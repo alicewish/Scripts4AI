@@ -1,10 +1,10 @@
 // ==UserScript==
-// @name         JSON Fetcher
-// @name:zh-CN   JSON请求抓取
+// @name         JSON Fetcher (Enhanced)
+// @name:zh-CN   JSON请求抓取 (增强版)
 // @namespace    https://github.com/alicewish/
-// @version      1.1
+// @version      1.2
 // @author       Alicewish
-// @description  Claude对话单个&批量下载(含会话名称)、ChatGPT对话单个下载；所有浮动面板支持一键到顶部/一键到底部；Claude支持1天/一周/一月内筛选+进度条；日志可下载；特殊数据解析可下载为表格。
+// @description  Claude对话单个&批量下载(含会话名称)、ChatGPT对话单个下载；所有浮动面板支持一键到顶部/一键到底部；Claude支持1天/一周/一月内筛选+进度条；日志可下载；特殊数据解析可下载为表格。增强版：可配置面板初始位置/尺寸、图标更准确、日志字体更小、更紧凑、窗体半透明、特殊数据标题字号更大&下载按钮同行右侧
 // @match        *://yiyan.baidu.com/*
 // @match        *://*.chatgpt.com/*
 // @match        *://*.claude.ai/*
@@ -17,8 +17,34 @@
     'use strict';
 
     /************************************************************************
-     * [ICONS] - 统一管理按钮图标
+     * 1) 可修改的常量 - 初始位置尺寸 & 透明度 & 图标
      ************************************************************************/
+    // 三个主要面板的初始位置、大小(可根据需求自行调整)
+    const INITIAL_LOG_PANEL = {
+            left: 'calc(50% - 300px)', // 日志面板初始X位置
+            top: '100px',              // 日志面板初始Y位置
+            width: 400,               // 宽度
+            height: 300               // 高度
+        };
+
+    const INITIAL_JSON_PANEL = {
+        left: 'calc(50% - 600px)', // JSON面板初始X位置
+        top: '100px',              // JSON面板初始Y位置
+        width: 400,                // 宽度
+        height: 500                // 高度
+    };
+
+    const INITIAL_SPEC_PANEL = {
+        left: 'calc(50% + 200px)', // 特殊数据解析面板初始X位置
+        top: '100px',              // 初始Y位置
+        width: 420,                // 宽度
+        height: 320                // 高度
+    };
+
+    // 所有浮动窗体(含JSON预览)统一半透明度
+    const PANEL_OPACITY = 0.92;
+
+    // 新图标：更准确表达含义
     const ICONS = {
         downloadAll: '⬇️',       // 批量下载
         downloadLog: '📥',       // 下载日志
@@ -37,7 +63,7 @@
     };
 
     /************************************************************************
-     * [RequestInterceptor] - 负责抓取Xhr/Fetch, 进行分类、去重
+     * [RequestInterceptor] - 负责抓取 Xhr/Fetch, 进行分类、去重
      ************************************************************************/
     const RequestInterceptor = {
         capturedRequests: [],
@@ -144,7 +170,7 @@
         },
 
         addCaptured(url, content, method, status, headersObj) {
-            // 跳过重复URL
+            // 跳过重复
             if (this.isDuplicateUrl(url)) {
                 UILogger.logMessage(`重复请求，跳过: ${url}`);
                 return;
@@ -170,17 +196,16 @@
             const item = {url, content, filename, sizeKB, method, category, status, headersObj};
             this.capturedRequests.push(item);
 
-            UILogger.logMessage(`捕获JSON (${method}) [${status || '--'}]：${url}`);
+            UILogger.logMessage(`捕获JSON (${method}) [${status || '--'}]: ${url}`);
 
-            PoWParser.checkDifficulty(content);      // PoW难度
-            SpecialDataParser.parse(url, content);   // 特殊数据(Claude/ChatGPT)
-            UIManager.updateLists();                 // 更新UI
+            PoWParser.checkDifficulty(content);
+            SpecialDataParser.parse(url, content);
+            UIManager.updateLists();
         }
     };
 
-
     /************************************************************************
-     * [UILogger] - 日志面板 (等宽字体 + 下载功能)
+     * [UILogger] - 日志面板 (等宽字体 + 下载功能, 字体更小/紧凑)
      ************************************************************************/
     const LOG_STORAGE_KEY = 'JSONInterceptorLogs';
     const UILogger = {
@@ -207,8 +232,10 @@
             this.logPanel = new FloatingPanel({
                 id: 'log-panel-container',
                 title: '操作日志',
-                defaultWidth: 400,
-                defaultHeight: 300,
+                defaultLeft: INITIAL_LOG_PANEL.left,
+                defaultTop: INITIAL_LOG_PANEL.top,
+                defaultWidth: INITIAL_LOG_PANEL.width,
+                defaultHeight: INITIAL_LOG_PANEL.height,
                 reopenBtnText: '打开日志面板',
                 reopenBtnTop: '50px',
                 onClose: () => this.logMessage('日志面板已关闭'),
@@ -216,7 +243,7 @@
                 onRestore: () => this.logMessage('日志面板已还原')
             });
 
-            // “下载日志”按钮
+            // 下载日志按钮
             const btnDownloadLog = createPanelButton({
                 text: ICONS.downloadLog,
                 title: '下载日志文件',
@@ -224,7 +251,7 @@
                     this.downloadLogs();
                 }
             });
-            // “清空日志”按钮
+            // 清空日志
             const btnClear = createPanelButton({
                 text: ICONS.trash,
                 title: '清空日志',
@@ -238,10 +265,18 @@
 
             const ul = document.createElement('ul');
             ul.id = 'log-panel-list';
+            // 字体更小、更紧凑
+            ul.style.fontSize = '11px';
+            ul.style.lineHeight = '1.2';
+            ul.style.margin = 0;
+            ul.style.padding = 0;
+            ul.style.fontFamily = 'monospace';
+            ul.style.whiteSpace = 'pre';
+
             this.logListEl = ul;
             this.logPanel.contentEl.appendChild(ul);
 
-            // 载入历史日志
+            // 加载历史日志
             this.logEntries.forEach(entry => {
                 const li = document.createElement('li');
                 li.textContent = entry;
@@ -251,7 +286,6 @@
         },
 
         downloadLogs() {
-            // 文件名：<网页标题>-YYYYMMDD-HHMMSS.log
             const title = document.title.replace(/[\\/:*?"<>|]/g, '_') || 'log';
             const now = new Date();
             const y = now.getFullYear();
@@ -273,7 +307,7 @@
             document.body.removeChild(a);
             URL.revokeObjectURL(url);
 
-            UILogger.logMessage(`日志已下载: ${filename}`);
+            this.logMessage(`日志已下载: ${filename}`);
         },
 
         logMessage(msg) {
@@ -306,13 +340,15 @@
 
 
     /************************************************************************
-     * [FloatingPanel] - 通用面板(标题栏固定, 内容滚动, 支持一键到顶/底)
+     * [FloatingPanel] - 通用面板(标题栏固定 + 半透明 + 一键到顶/底 + snapEdges)
      ************************************************************************/
     class FloatingPanel {
         constructor(options = {}) {
             const {
                 id = '',
                 title = '浮动面板',
+                defaultLeft = '50px',
+                defaultTop = '50px',
                 defaultWidth = 300,
                 defaultHeight = 200,
                 showReopenBtn = true,
@@ -328,8 +364,6 @@
 
             this.id = id;
             this.title = title;
-            this.defaultWidth = defaultWidth;
-            this.defaultHeight = defaultHeight;
             this.showReopenBtn = showReopenBtn;
             this.reopenBtnText = reopenBtnText;
             this.reopenBtnTop = reopenBtnTop;
@@ -338,13 +372,16 @@
             this.onMinimize = onMinimize;
             this.onRestore = onRestore;
 
+            // 统一半透明
+            this.panelOpacity = PANEL_OPACITY;
+
             this.panelState = {
                 minimized: false,
                 closed: false,
-                left: '',
-                top: '',
-                width: this.defaultWidth + 'px',
-                height: this.defaultHeight + 'px'
+                left: defaultLeft,
+                top: defaultTop,
+                width: defaultWidth + 'px',
+                height: defaultHeight + 'px'
             };
 
             this.dragging = false;
@@ -356,34 +393,37 @@
         }
 
         initDom() {
+            // 创建容器
             this.container = document.createElement('div');
             this.container.classList.add('floating-panel');
             if (this.id) {
                 this.container.id = this.id;
             }
+
+            // 设置初始位置 & 半透明
+            this.container.style.left = this.panelState.left;
+            this.container.style.top = this.panelState.top;
             this.container.style.width = this.panelState.width;
             this.container.style.height = this.panelState.height;
+            this.container.style.opacity = this.panelOpacity;
 
             // 标题栏
             this.titlebar = document.createElement('div');
             this.titlebar.className = 'floating-panel-titlebar';
 
-            // 小圆把手
             this.dragHandle = document.createElement('div');
             this.dragHandle.className = 'floating-panel-drag-handle';
 
-            // 标题文字
             this.titleSpan = document.createElement('span');
             this.titleSpan.className = 'floating-panel-title';
             this.titleSpan.textContent = this.title;
 
-            // “滚动到顶部”按钮
+            // 上下滚
             this.btnScrollTop = createPanelButton({
                 text: ICONS.scrollTop,
                 title: '滚动到顶部',
                 onClick: () => this.scrollToTop()
             });
-            // “滚动到底部”按钮
             this.btnScrollBottom = createPanelButton({
                 text: ICONS.scrollBottom,
                 title: '滚动到底部',
@@ -402,7 +442,7 @@
                 onClick: () => this.close()
             });
 
-            // 把按钮依次加到标题栏
+            // 标题栏组装
             this.titlebar.appendChild(this.dragHandle);
             this.titlebar.appendChild(this.titleSpan);
             this.titlebar.appendChild(this.btnScrollTop);
@@ -414,6 +454,7 @@
             this.contentEl = document.createElement('div');
             this.contentEl.className = 'floating-panel-content';
 
+            // 完整组装
             this.container.appendChild(this.titlebar);
             this.container.appendChild(this.contentEl);
             document.body.appendChild(this.container);
@@ -502,9 +543,9 @@
 
             Object.assign(this.panelState, st);
             const {minimized, closed, left, top, width, height} = this.panelState;
-            if (left) this.container.style.left = left;
-            if (top) this.container.style.top = top;
-            if (width) this.container.style.width = width;
+            this.container.style.left = left;
+            this.container.style.top = top;
+            this.container.style.width = width;
             if (!minimized && height) {
                 this.container.style.height = height;
             }
@@ -579,17 +620,14 @@
             this.saveState();
         }
 
-        // 面板内容区滚动到顶部
         scrollToTop() {
             this.contentEl.scrollTop = 0;
         }
 
-        // 面板内容区滚动到底部
         scrollToBottom() {
             this.contentEl.scrollTop = this.contentEl.scrollHeight;
         }
     }
-
 
     /************************************************************************
      * [ZIndexManager] - 用于管理面板层级
@@ -615,7 +653,7 @@
                     this.currentDifficulty = parsed.proofofwork.difficulty;
                     UIManager.refreshJsonPanelTitle();
                 }
-            } catch (err) {
+            } catch (e) {
             }
         }
     };
@@ -625,8 +663,8 @@
      * [SpecialDataParser] - 解析Claude/ChatGPT并支持单个/批量下载
      ************************************************************************/
     const SpecialDataParser = {
-        claudeData: [],   // { uuid, name, updated_at_shanghai, convUrl }
-        chatgptData: [],  // { id, title, update_time_shanghai, convUrl }
+        claudeData: [],
+        chatgptData: [],
 
         parse(reqUrl, raw) {
             // 1) Claude array
@@ -634,7 +672,7 @@
             if (reClaudeList.test(reqUrl) && !reqUrl.includes('?')) {
                 this.parseClaudeArray(reqUrl, raw);
             }
-            // 2) ChatGPT list
+            // 2) ChatGPT
             const reChatgptList = /\/backend-api\/conversations\?/i;
             if (reChatgptList.test(reqUrl)) {
                 this.parseChatGPTList(raw);
@@ -664,8 +702,8 @@
                         convUrl
                     });
                 });
-            } catch (err) {
-                UILogger.logMessage(`解析Claude数据出错: ${err.message}`);
+            } catch (e) {
+                UILogger.logMessage(`解析Claude数据出错: ${e.message}`);
             }
         },
 
@@ -673,7 +711,7 @@
             try {
                 const obj = JSON.parse(raw);
                 if (!obj || !Array.isArray(obj.items)) return;
-                // chatgpt conversation detail: https://chatgpt.com/backend-api/conversation/<id>
+                // chatgpt.com/backend-api/conversation/<id>
                 obj.items.forEach(item => {
                     const {id, title, update_time} = item;
                     const shTime = this.toShanghai(update_time);
@@ -683,8 +721,8 @@
                     }
                     this.chatgptData.push({id, title, update_time_shanghai: shTime, convUrl});
                 });
-            } catch (err) {
-                UILogger.logMessage(`解析ChatGPT数据出错: ${err.message}`);
+            } catch (e) {
+                UILogger.logMessage(`解析ChatGPT数据出错: ${e.message}`);
             }
         },
 
@@ -699,7 +737,6 @@
             }
         },
 
-        // 下载单个
         async downloadClaudeConversation(claudeItem) {
             if (!claudeItem || !claudeItem.convUrl) {
                 UILogger.logMessage('Claude对话下载跳过：无有效链接');
@@ -713,15 +750,12 @@
                     return;
                 }
                 const txt = await resp.text();
-
-                // 文件名示例： 失落的孩子们P3-81877090-6484-4266-933d-145a776d442f.json
-                let safeName = name.replace(/[\\/:*?"<>|]/g, '_'); // 过滤特殊字符
+                let safeName = name.replace(/[\\/:*?"<>|]/g, '_');
                 let fileName = safeName || 'claude-conv';
                 if (uuid) fileName += '-' + uuid;
                 if (!fileName.endsWith('.json')) {
                     fileName += '.json';
                 }
-
                 const blob = new Blob([txt], {type: 'application/json'});
                 const url = URL.createObjectURL(blob);
                 const a = document.createElement('a');
@@ -733,12 +767,11 @@
                 URL.revokeObjectURL(url);
 
                 UILogger.logMessage(`Claude对话已下载：${fileName}`);
-            } catch (err) {
-                UILogger.logMessage(`下载Claude对话出错：${err.message} - ${name}-${uuid}`);
+            } catch (e) {
+                UILogger.logMessage(`下载Claude对话出错：${e.message} - ${name}-${uuid}`);
             }
         },
 
-        // 下载单个 ChatGPT 对话
         async downloadChatGPTConversation(convUrl) {
             if (!convUrl) {
                 UILogger.logMessage('ChatGPT对话下载跳过：无有效链接');
@@ -765,8 +798,8 @@
                 URL.revokeObjectURL(url);
 
                 UILogger.logMessage(`ChatGPT对话已下载：${fileName}`);
-            } catch (err) {
-                UILogger.logMessage(`下载ChatGPT对话出错：${err.message}`);
+            } catch (e) {
+                UILogger.logMessage(`下载ChatGPT对话出错：${e.message}`);
             }
         }
     };
@@ -795,7 +828,7 @@
         claudeListEl: null,
         chatgptListEl: null,
 
-        // Claude 批量下载时的进度条相关
+        // Claude 批量下载进度
         claudeProgressWrap: null,
         claudeProgressBar: null,
         claudeProgressText: null,
@@ -814,13 +847,14 @@
             this.initSpecialDataPanel();
         },
 
-        /********** JSON面板 **********/
         initJsonPanel() {
             this.jsonPanel = new FloatingPanel({
                 id: 'json-panel-container',
                 title: 'JSON 抓取器',
-                defaultWidth: 450,
-                defaultHeight: 500,
+                defaultLeft: INITIAL_JSON_PANEL.left,
+                defaultTop: INITIAL_JSON_PANEL.top,
+                defaultWidth: INITIAL_JSON_PANEL.width,
+                defaultHeight: INITIAL_JSON_PANEL.height,
                 reopenBtnText: '打开JSON抓取器',
                 reopenBtnTop: '10px',
                 onClose: () => UILogger.logMessage('JSON面板已关闭'),
@@ -828,7 +862,7 @@
                 onRestore: () => UILogger.logMessage('JSON面板已还原')
             });
 
-            // 标题栏插入“切换分类”按钮
+            // 插入一个“切换分类”按钮
             const btnSettings = createPanelButton({
                 text: ICONS.gear,
                 title: '切换是否使用分类',
@@ -929,7 +963,7 @@
                 contentWrap.appendChild(otherCat.wrapper);
 
             } else {
-                // 单列表 (all)
+                // 单列表(all)
                 const allCat = this.createCategorySection('所有请求',
                     () => this.downloadAll(RequestInterceptor.capturedRequests),
                     () => {
@@ -958,13 +992,11 @@
 
             const btnsWrap = document.createElement('div');
 
-            // 批量下载
             const btnDownload = createPanelButton({
                 text: ICONS.downloadAll,
                 title: `批量下载 - ${title}`,
                 onClick: onDownloadAll
             });
-            // 清空
             const btnClear = createPanelButton({
                 text: ICONS.trash,
                 title: `清空 - ${title}`,
@@ -1040,9 +1072,7 @@
                 arr = this.getRequestsByCategory(cat);
             }
             if (sortBy === 'name') {
-                arr.sort((a, b) => asc
-                    ? a.filename.localeCompare(b.filename)
-                    : b.filename.localeCompare(a.filename));
+                arr.sort((a, b) => asc ? a.filename.localeCompare(b.filename) : b.filename.localeCompare(a.filename));
             } else {
                 arr.sort((a, b) => {
                     const sa = parseFloat(a.sizeKB);
@@ -1051,7 +1081,6 @@
                 });
             }
             if (cat !== 'all') {
-                // 先把该分类清掉，再把排序好的结果追加回去
                 RequestInterceptor.capturedRequests = RequestInterceptor.capturedRequests.filter(it => it.category !== cat);
                 RequestInterceptor.capturedRequests.push(...arr);
             }
@@ -1172,9 +1201,7 @@
                 return;
             }
             let fn = item.filename || 'download';
-            if (!fn.endsWith('.json')) {
-                fn += '.json';
-            }
+            if (!fn.endsWith('.json')) fn += '.json';
             const blob = new Blob([item.content], {type: 'application/json'});
             const url = URL.createObjectURL(blob);
             const a = document.createElement('a');
@@ -1203,6 +1230,8 @@
             }
             const container = document.createElement('div');
             container.className = 'floating-panel json-preview-container';
+            // 半透明
+            container.style.opacity = PANEL_OPACITY;
 
             // 标题栏
             const titlebar = document.createElement('div');
@@ -1213,7 +1242,7 @@
 
             const titleSpan = document.createElement('span');
             titleSpan.className = 'floating-panel-title';
-            titleSpan.textContent = `JSON 预览: ${item.filename}`;
+            titleSpan.textContent = 'JSON 预览: ' + item.filename;
 
             // 滚动到顶部
             const btnScrollTop = createPanelButton({
@@ -1245,6 +1274,7 @@
                 pretty = JSON.stringify(parsed, null, 2);
             } catch (e) {
             }
+
             const highlighted = this.highlightJson(pretty);
 
             const metaDiv = document.createElement('div');
@@ -1360,13 +1390,14 @@
             this.jsonPanel.setTitle(t);
         },
 
-        /********** 特殊数据面板 **********/
         initSpecialDataPanel() {
             this.specialDataPanel = new FloatingPanel({
                 id: 'special-data-panel-container',
                 title: '特殊数据解析',
-                defaultWidth: 420,
-                defaultHeight: 320,
+                defaultLeft: INITIAL_SPEC_PANEL.left,
+                defaultTop: INITIAL_SPEC_PANEL.top,
+                defaultWidth: INITIAL_SPEC_PANEL.width,
+                defaultHeight: INITIAL_SPEC_PANEL.height,
                 reopenBtnText: '打开“特殊解析”面板',
                 reopenBtnTop: '130px',
                 onClose: () => UILogger.logMessage('特殊数据解析面板已关闭'),
@@ -1374,7 +1405,7 @@
                 onRestore: () => UILogger.logMessage('特殊数据解析面板已还原')
             });
 
-            // “清空解析数据”按钮
+            // 清空解析数据
             const btnClear = createPanelButton({
                 text: ICONS.trash,
                 title: '清空所有解析数据',
@@ -1387,13 +1418,11 @@
             });
             this.specialDataPanel.titlebar.insertBefore(btnClear, this.specialDataPanel.btnMinimize);
 
-            // “下载表格”按钮
+            // 下载表格CSV
             const btnTable = createPanelButton({
                 text: ICONS.table,
                 title: '导出当前解析数据为表格CSV',
-                onClick: () => {
-                    this.downloadSpecialDataAsCSV();
-                }
+                onClick: () => this.downloadSpecialDataAsCSV()
             });
             this.specialDataPanel.titlebar.insertBefore(btnTable, this.specialDataPanel.btnMinimize);
 
@@ -1401,9 +1430,10 @@
             const wrap = this.specialDataPanel.contentEl;
             wrap.innerHTML = '';
 
-            // Claude block
+            // Claude区块
             const claudeBlock = document.createElement('div');
             claudeBlock.className = 'special-data-category';
+
             const claudeHeader = document.createElement('div');
             claudeHeader.className = 'special-data-category-header';
 
@@ -1412,15 +1442,15 @@
             claudeTitle.textContent = 'Claude Conversations';
             claudeHeader.appendChild(claudeTitle);
 
-            // 批量下载（全部）
+            // 批量下载(全部)
             const claudeBatchBtn = createPanelButton({
-                text: '⬇️全部',
+                text: '⇩全部',
                 title: '批量下载全部Claude对话',
                 onClick: () => this.batchDownloadClaude() // 不过滤
             });
             claudeHeader.appendChild(claudeBatchBtn);
 
-            // 下载最近1天
+            // 1天
             const claudeDayBtn = createPanelButton({
                 text: ICONS.day,
                 title: '下载最近一天的Claude对话',
@@ -1428,7 +1458,7 @@
             });
             claudeHeader.appendChild(claudeDayBtn);
 
-            // 下载最近一周
+            // 1周
             const claudeWeekBtn = createPanelButton({
                 text: ICONS.week,
                 title: '下载最近一周的Claude对话',
@@ -1436,7 +1466,7 @@
             });
             claudeHeader.appendChild(claudeWeekBtn);
 
-            // 下载最近一个月
+            // 1月
             const claudeMonthBtn = createPanelButton({
                 text: ICONS.month,
                 title: '下载最近一个月的Claude对话',
@@ -1465,15 +1495,15 @@
             this.claudeProgressBar = progressBar;
             this.claudeProgressText = progressText;
 
-            // Claude 列表
             const claudeUl = document.createElement('ul');
             claudeUl.className = 'special-data-list';
             claudeBlock.appendChild(claudeUl);
             this.claudeListEl = claudeUl;
 
-            // ChatGPT block
+            // ChatGPT区块
             const chatgptBlock = document.createElement('div');
             chatgptBlock.className = 'special-data-category';
+
             const chatgptHeader = document.createElement('div');
             chatgptHeader.className = 'special-data-category-header';
 
@@ -1482,7 +1512,6 @@
             chatgptTitle.textContent = 'ChatGPT Conversations';
             chatgptHeader.appendChild(chatgptTitle);
 
-            // 批量下载
             const chatgptBatchBtn = createPanelButton({
                 text: ICONS.downloadAll,
                 title: '批量下载全部ChatGPT对话',
@@ -1504,8 +1533,6 @@
         },
 
         updateSpecialDataPanel() {
-            if (!this.specialDataPanel) return;
-
             // Claude
             if (this.claudeListEl) {
                 this.claudeListEl.innerHTML = '';
@@ -1513,24 +1540,21 @@
                     const li = document.createElement('li');
                     li.className = 'special-data-list-item';
 
-                    // 名称 (蓝色)
+                    // 标题行(大字 + 下载按钮同行右侧)
                     const line1 = document.createElement('div');
                     line1.className = 'special-data-item-line';
-                    line1.innerHTML = `<strong style="color:#1f6feb;">name:</strong> <span style="color:#1f6feb;">${item.name || ''}</span>`;
+                    // 样式
+                    line1.style.fontSize = '14px'; // 字号稍大
+                    line1.style.marginBottom = '4px';
+                    line1.style.display = 'flex';
+                    line1.style.justifyContent = 'space-between';
+                    line1.style.alignItems = 'center';
 
-                    // ID (紫色)
-                    const line2 = document.createElement('div');
-                    line2.className = 'special-data-item-line';
-                    line2.innerHTML = `<strong style="color:#c678dd;">uuid:</strong> <span style="color:#c678dd;">${item.uuid || ''}</span>`;
+                    const leftSpan = document.createElement('span');
+                    leftSpan.innerHTML = `<strong style="color:#1f6feb;">name:</strong> <span style="color:#1f6feb;">${item.name || ''}</span>`;
 
-                    // 时间(淡色)
-                    const line3 = document.createElement('div');
-                    line3.className = 'special-data-item-line';
-                    line3.innerHTML = `<strong style="color:#999;">updated_at(沪):</strong> <span style="color:#999;">${item.updated_at_shanghai || ''}</span>`;
+                    line1.appendChild(leftSpan);
 
-                    // 下载对话图标按钮
-                    const line4 = document.createElement('div');
-                    line4.className = 'special-data-item-line';
                     if (item.convUrl) {
                         const dlIcon = document.createElement('span');
                         dlIcon.textContent = ICONS.downloadAll;
@@ -1539,15 +1563,22 @@
                         dlIcon.addEventListener('click', () => {
                             SpecialDataParser.downloadClaudeConversation(item);
                         });
-                        line4.appendChild(dlIcon);
-                    } else {
-                        line4.textContent = '(无对话链接)';
+                        line1.appendChild(dlIcon);
                     }
-
                     li.appendChild(line1);
+
+                    // uuid(紫色)
+                    const line2 = document.createElement('div');
+                    line2.className = 'special-data-item-line';
+                    line2.innerHTML = `<strong style="color:#c678dd;">uuid:</strong> <span style="color:#c678dd;">${item.uuid || ''}</span>`;
+
+                    // 时间(灰)
+                    const line3 = document.createElement('div');
+                    line3.className = 'special-data-item-line';
+                    line3.innerHTML = `<strong style="color:#999;">updated_at:</strong> <span style="color:#999;">${item.updated_at_shanghai || ''}</span>`;
+
                     li.appendChild(line2);
                     li.appendChild(line3);
-                    li.appendChild(line4);
 
                     this.claudeListEl.appendChild(li);
                 });
@@ -1560,20 +1591,19 @@
                     const li = document.createElement('li');
                     li.className = 'special-data-list-item';
 
+                    // 标题行(大字 + 下载按钮同行右侧)
                     const line1 = document.createElement('div');
                     line1.className = 'special-data-item-line';
-                    line1.innerHTML = `<strong style="color:#1f6feb;">title:</strong> <span style="color:#1f6feb;">${item.title || ''}</span>`;
+                    line1.style.fontSize = '14px';
+                    line1.style.marginBottom = '4px';
+                    line1.style.display = 'flex';
+                    line1.style.justifyContent = 'space-between';
+                    line1.style.alignItems = 'center';
 
-                    const line2 = document.createElement('div');
-                    line2.className = 'special-data-item-line';
-                    line2.innerHTML = `<strong style="color:#c678dd;">id:</strong> <span style="color:#c678dd;">${item.id || ''}</span>`;
+                    const leftSpan = document.createElement('span');
+                    leftSpan.innerHTML = `<strong style="color:#1f6feb;">title:</strong> <span style="color:#1f6feb;">${item.title || ''}</span>`;
+                    line1.appendChild(leftSpan);
 
-                    const line3 = document.createElement('div');
-                    line3.className = 'special-data-item-line';
-                    line3.innerHTML = `<strong style="color:#999;">update_time(沪):</strong> <span style="color:#999;">${item.update_time_shanghai || ''}</span>`;
-
-                    const line4 = document.createElement('div');
-                    line4.className = 'special-data-item-line';
                     if (item.convUrl) {
                         const dlIcon = document.createElement('span');
                         dlIcon.textContent = ICONS.downloadAll;
@@ -1582,25 +1612,29 @@
                         dlIcon.addEventListener('click', () => {
                             SpecialDataParser.downloadChatGPTConversation(item.convUrl);
                         });
-                        line4.appendChild(dlIcon);
-                    } else {
-                        line4.textContent = '(无对话链接)';
+                        line1.appendChild(dlIcon);
                     }
-
                     li.appendChild(line1);
+
+                    // id
+                    const line2 = document.createElement('div');
+                    line2.className = 'special-data-item-line';
+                    line2.innerHTML = `<strong style="color:#c678dd;">id:</strong> <span style="color:#c678dd;">${item.id || ''}</span>`;
+
+                    // 时间
+                    const line3 = document.createElement('div');
+                    line3.className = 'special-data-item-line';
+                    line3.innerHTML = `<strong style="color:#999;">update_time:</strong> <span style="color:#999;">${item.update_time_shanghai || ''}</span>`;
+
                     li.appendChild(line2);
                     li.appendChild(line3);
-                    li.appendChild(line4);
 
                     this.chatgptListEl.appendChild(li);
                 });
             }
         },
 
-        // 下载表格CSV
         downloadSpecialDataAsCSV() {
-            // 格式：Type, NameOrTitle, ID, UpdateTime
-            // 站点名 & 当前时间
             const domain = location.hostname.replace(/[\\/:*?"<>|]/g, '_') || 'site';
             const now = new Date();
             const y = now.getFullYear();
@@ -1612,7 +1646,6 @@
             const filename = `special-data-${domain}-${y}${M}${d}-${hh}${mm}${ss}.csv`;
 
             let lines = ['Type,NameOrTitle,ID,UpdateTime'];
-
             // Claude
             SpecialDataParser.claudeData.forEach(it => {
                 const type = 'Claude';
@@ -1644,7 +1677,6 @@
             UILogger.logMessage(`特殊数据CSV已下载: ${filename}`);
         },
 
-        // === Claude批量下载 ===
         batchDownloadClaude() {
             this.batchDownloadClaudeItems(SpecialDataParser.claudeData, '全部');
         },
@@ -1666,7 +1698,7 @@
                 UILogger.logMessage(`Claude批量下载【${label}】无数据`);
                 return;
             }
-            UILogger.logMessage(`开始批量下载 Claude 对话（${label}），共 ${list.length} 个。`);
+            UILogger.logMessage(`开始批量下载 Claude 对话（${label}），共${list.length}个。`);
 
             this.showClaudeProgressBar(true);
             this.updateClaudeProgress(0, list.length, label);
@@ -1677,7 +1709,7 @@
                 setTimeout(async () => {
                     await SpecialDataParser.downloadClaudeConversation(item);
                     finishedCount++;
-                    successCount++; // 此处没有更精细的成功/失败判断
+                    successCount++;
 
                     this.updateClaudeProgress(finishedCount, list.length, label);
 
@@ -1703,7 +1735,6 @@
             this.claudeProgressText.textContent = `${label}：${current} / ${total}`;
         },
 
-        // === ChatGPT批量下载 ===
         batchDownloadChatGPT() {
             if (!SpecialDataParser.chatgptData || !SpecialDataParser.chatgptData.length) {
                 alert('无ChatGPT对话可下载');
@@ -1721,7 +1752,6 @@
             UILogger.logMessage('开始批量下载 ' + count + ' 个ChatGPT对话');
         }
     };
-
 
     /************************************************************************
      * 辅助函数
@@ -1753,9 +1783,9 @@
 
     function onBodyReady() {
         findStarUuid();
-        UILogger.init();          // 日志面板
-        UIManager.init();         // JSON & 特殊数据面板
-        RequestInterceptor.init(); // 抓取器
+        UILogger.init();      // 日志面板
+        UIManager.init();     // JSON面板 & 特殊数据解析面板
+        RequestInterceptor.init(); // XHR & Fetch抓取
         UILogger.logMessage('脚本已启动 - 面板已生成。');
     }
 
@@ -1769,10 +1799,12 @@
 
     waitForBody();
 
+
     /************************************************************************
-     * 样式
+     * 样式 - 保持单文件，不引用外部资源
      ************************************************************************/
     const cssText = `
+    /* 浮动窗体：4) 所有半透明 (在JS中也赋值了 .style.opacity ) */
     .floating-panel {
       position: fixed;
       background: #fff;
@@ -1783,9 +1815,7 @@
       color: #333;
       display: flex;
       flex-direction: column;
-      width: 400px;
-      height: 300px;
-      overflow: hidden; /* 标题固定，内容滚动 */
+      overflow: hidden;
       resize: both;
     }
     .floating-panel.minimized {
@@ -1823,14 +1853,14 @@
       border: none;
       background: transparent;
       font-size: 14px;
-      margin: 0 1px; /* 更紧凑 */
-      user-select: none;
+      margin: 0 1px;
       padding: 0 3px;
+      user-select: none;
     }
     .floating-panel-content {
       flex: 1;
       background: #fafafa;
-      overflow: auto; /* 滚动 */
+      overflow: auto;
     }
     .floating-reopen-btn {
       display: none;
@@ -1845,11 +1875,22 @@
       z-index: 999999999;
     }
 
+    /* 日志面板(3)字体更小更紧凑, 见JS中也设置了fontSize=11px, lineHeight=1.2 */
+    #log-panel-container {
+    }
+
+    #log-panel-list {
+      list-style: none;
+      margin: 0;
+      padding: 0;
+      font-family: monospace;
+      white-space: pre;
+    }
+
     /* JSON面板 */
     #json-panel-container {
-      top: 50px;
-      right: 50px;
     }
+
     .json-panel-search-wrap {
       margin: 8px;
       display: flex;
@@ -1923,39 +1964,26 @@
       color: #999;
     }
 
-    /* 日志面板 (等宽字体) */
-    #log-panel-container {
-      top: 60px;
-      left: 50px;
-    }
-    #log-panel-list {
-      list-style: none;
-      margin: 0;
-      padding: 0;
-      font-size: 13px;
-      font-family: monospace; /* 等宽字体 */
-      white-space: pre;       /* 保持日志对齐 */
-    }
-    #log-panel-list li {
-      padding: 4px 8px;
-      border-bottom: 1px solid #eee;
-      word-break: break-all;
-    }
-    #log-panel-list li:nth-child(even) {
-      background: #f8f8f8;
-    }
-
     /* JSON预览 */
     .json-preview-container {
       width: 600px;
       height: 400px;
       top: 100px;
       left: 100px;
+      position: fixed;
+      border: 1px solid #ccc;
+      border-radius: 8px;
+      box-shadow: 0 3px 10px rgba(0,0,0,0.25);
+      display: flex;
+      flex-direction: column;
+      resize: both;
+      overflow: hidden;
     }
     .json-preview-content {
       background: #f6f8fa;
       padding: 8px;
       overflow: auto;
+      flex:1;
     }
     .json-preview {
       font-size: 12px;
@@ -1972,10 +2000,6 @@
 
     /* 特殊数据面板 */
     #special-data-panel-container {
-      top: 130px;
-      right: 520px;
-      width: 420px;
-      height: 320px;
     }
     .special-data-category {
       margin: 8px;
@@ -2015,6 +2039,8 @@
     .special-data-item-line {
       margin: 2px 0;
     }
+
+    /* 第5点: 标题行字号稍大, 下载按钮同行右侧(见JS) */
 
     /* Claude 进度条 */
     .claude-progress-wrap {
