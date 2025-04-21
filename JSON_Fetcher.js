@@ -1,8 +1,8 @@
 // ==UserScript==
 // @name         JSON Fetcher Ultimate (Advanced InlineConfirm Edition, EphemeralPreview Fixed)
 // @namespace    https://github.com/alicewish/
-// @version      2.0.20250419
-// @description  满足各种改动需求，月薪十万美元水平的高阶版，行内确认，无弹窗，支持临时预览面板（已优化修正）
+// @version      3.0
+// @description  满足各种需求
 // @match        *://yiyan.baidu.com/*
 // @match        *://*.chatgpt.com/*
 // @match        *://*.claude.ai/*
@@ -15,6 +15,49 @@
 
 (function () {
     'use strict';
+
+    /************************************************************************
+     * 0. 统一按钮配置：集中管理所有图标、名称、提示
+     *    （去除在暗色主题下会变彩色Emoji的字符，用 \uFE0E 或者非emoji字符来修正）
+     ************************************************************************/
+    const BUTTON_MAP = {
+        // 标题栏 & 通用操作相关
+        SCROLL_TOP: {icon: '↥', label: 'ScrollTop', title: '滚动到顶部'},
+        SCROLL_BOTTOM: {icon: '↧', label: 'ScrollBottom', title: '滚动到底部'},
+        MINIMIZE: {icon: '▁', label: 'Minimize', title: '最小化面板'},
+        RESTORE: {icon: '▔', label: 'Restore', title: '还原面板'},
+        CLOSE: {icon: '×', label: 'Close', title: '关闭面板'},
+
+        // 日志面板
+        DOWNLOAD_LOG: {icon: '📥', label: 'DownloadLog', title: '下载日志文件到本地'},
+        CLEAR_LOGS: {icon: '🗑️', label: 'ClearLogs', title: '清空全部日志'},
+        AUTO_SCROLL: {icon: '⤵️', label: 'AutoScroll', title: '自动滚动到最新日志开关'},
+        WRAP_LINES: {icon: '↩️', label: 'WrapLines', title: '日志换行开关'},
+
+        // JSON抓取面板
+        THEME_TOGGLE: {icon: '🌗', label: 'ThemeToggle', title: '切换亮/暗主题'},
+        TOGGLE_CAT: {icon: '⚙', label: 'ToggleCategory', title: '按分类显示或不分类'},
+        COPY_JSON: {icon: '📋', label: 'CopyJSON', title: '复制此JSON到剪贴板'},
+        DOWNLOAD_JSON: {icon: '⬇️', label: 'DownloadJSON', title: '下载此JSON文件'},
+        PREVIEW_JSON: {icon: '👁️', label: 'PreviewJSON', title: '预览此JSON'},
+        REMOVE_ITEM: {icon: '✂️', label: 'RemoveItem', title: '删除此条抓取记录'},
+        DOWNLOAD_ALL: {icon: '⬇️', label: 'DownloadAll', title: '批量下载'},
+        CLEAR_CATEGORY: {icon: '🗑️', label: 'ClearCategory', title: '清空此分类'},
+        SORT_ASC: {icon: '🔼', label: 'SortAsc', title: '升序排序'},
+        SORT_DESC: {icon: '🔽', label: 'SortDesc', title: '降序排序'},
+
+        // 特殊数据面板
+        TO_CSV: {icon: '⬇️表格', label: 'ToCSV', title: '导出所有解析数据为CSV'},
+        FOLD_ALL: {icon: '⏵', label: 'FoldAll', title: '折叠所有分类'},
+        UNFOLD_ALL: {icon: '⏷', label: 'UnfoldAll', title: '展开所有分类'},
+        DL_SINGLE: {icon: '⬇️', label: 'DownloadSingle', title: '下载此对话'},
+        TRASH: {icon: '🗑️', label: 'TrashAll', title: '清空所有解析数据'},
+
+        // 行内确认
+        CONFIRM_CHECK: {icon: '✔️', label: 'ConfirmYes', title: '确定'},
+        CONFIRM_CANCEL: {icon: '×', label: 'ConfirmNo', title: '取消'}
+    };
+
 
     /************************************************************************
      * 1. 全局配置 / 常量（CONFIG）
@@ -30,22 +73,22 @@
         // 面板拖拽/缩放/吸附/透明度等 (不受主题影响)
         panelLimit: {
             defaultPanelOpacity: 0.95,  // 面板默认不透明度
-            snapThreshold: 15,         // 吸附像素范围
-            enableBackdropBlur: false  // 如果关闭，则强制不透明背景(主题透明度失效)
+            snapThreshold: 15,    // 吸附像素范围
+            enableBackdropBlur: false  // 若关闭，则强制不透明背景(主题透明度失效)
         },
 
         // 额外功能限制或特性选项
         features: {
             enableInlineConfirm: true, // 是否启用行内确认(替代系统confirm)
-            maxLogEntries: 1000,  // 日志最多保留多少条，超过后丢弃最旧的
-            maxJSONSizeKB: 0,     // 如需提醒过大JSON，可设置 >0 (单位KB)，0不限制
-            autoCleanupOnLarge: false  // 若为true, 超限的JSON直接丢弃
+            maxLogEntries: 1000, // 日志最多保留多少条，超过后丢弃最旧的
+            maxJSONSizeKB: 0,    // 若 >0 则提示过大JSON, 0 不限制
+            autoCleanupOnLarge: false // 若为true, 超过maxJSONSizeKB的JSON直接丢弃
         },
 
         // 是否在 JSON 面板标题中显示 PoW 难度(仅示例用)
         showPoWDifficulty: true,
 
-        // 星标关键字(如 "VIP"、"myFav")
+        // 星标关键字(如 "VIP"、"myFav" 等)
         userStarKeywords: [],
 
         // Claude 列表 URL 正则
@@ -67,46 +110,6 @@
         settingsStorageKey: 'JSONInterceptorSettings',
         panelStatePrefix: 'FloatingPanelState_',
 
-        // 图标文本
-        ICONS: {
-            downloadAll: '⬇️',
-            downloadLog: '📥',
-            trash: '🗑️',
-            scrollTop: '↥',
-            scrollBottom: '↧',
-            minimize: '➖',
-            restore: '▔',
-            close: '✖️',
-            copy: '📋',
-            preview: '👁️',
-            gear: '⚙',
-            table: '⬇️表格',
-            fold: '⏵',
-            unfold: '⏷',
-            themeSwitch: '🌗',
-            removeItem: '✂️',
-            confirmCheck: '✔️',
-            confirmCancel: '✖️'
-        },
-
-        // 字号相关 (不受主题影响)
-        fontSizes: {
-            title: '16px',        // 面板标题字号
-            content: '13px',      // 面板正文字号
-            categoryTitle: '16px',// 分类标题字号(加大)
-            categoryItem: '13px', // 分类子项字号
-            log: '12px',          // 日志面板
-            inlineConfirm: '14px' // 行内确认提示
-        },
-
-        // 图标按钮尺寸相关 (不受主题影响)
-        iconSizes: {
-            titlebarButton: '14px',  // 标题栏按钮
-            panelButton: '12px',
-            categoryTitleButton: '14px',
-            categoryItemButton: '12px'
-        },
-
         // 面板外观特效 (不受主题影响)
         panelEffects: {
             borderRadius: '8px',
@@ -116,7 +119,47 @@
             minimizedHeight: '36px'
         },
 
-        // 主题颜色配置
+        // 字号相关 (不受主题影响)
+        fontSizes: {
+            title: '16px', // 面板标题字号
+            content: '13px', // 面板正文字号
+            categoryTitle: '16px', // 分类标题字号(加大)
+            categoryItem: '13px', // 分类子项字号
+            log: '12px', // 日志面板
+            inlineConfirm: '14px'  // 行内确认提示
+        },
+
+        // 图标按钮尺寸相关 (不受主题影响)
+        iconSizes: {
+            titlebarButton: '14px', // 标题栏按钮
+            panelButton: '12px',
+            categoryTitleButton: '14px',
+            categoryItemButton: '12px'
+        },
+
+        // 与布局/间距相关的通用设置(不受主题影响)
+        layout: {
+            // 行内确认
+            inlineConfirmPadding: '8px 12px',
+            inlineConfirmButtonPadding: '2px 6px',
+
+            // 面板拖拽把手
+            dragHandleSize: '18px',
+            dragHandleMargin: '0 4px',
+
+            // 面板内容区
+            floatingPanelContentPadding: '4px',
+
+            // 分类及列表
+            categoryMargin: '8px',
+            categoryHeaderPadding: '4px 8px',
+            itemPadding: '4px 8px',
+
+            // 进度条
+            progressBarHeight: '28px'
+        },
+
+        // 主题颜色配置 (light/dark)
         themes: {
             light: {
                 // 面板
@@ -157,8 +200,8 @@
                 categoryTitleColor: '#444',
                 searchLabelColor: '#333',
                 itemDividerColor: '#eee',
-                panelMinimizeBtnColor: '#333',
-                panelCloseBtnColor: '#c00',
+                panelMinimizeBtnColor: '#333', // 最小化按钮(在light主题下)
+                panelCloseBtnColor: '#c00', // 关闭按钮(在light主题下)
                 foldIconColor: '#333',
                 panelReopenBtnBg: '#f0f0f0',
 
@@ -175,13 +218,21 @@
                 inlineConfirmBg: 'rgba(30,30,30,0.85)',
                 inlineConfirmText: '#fff',
                 inlineConfirmBorder: 'rgba(0,0,0,0.3)',
-                // 行内确认按钮对错颜色
-                inlineConfirmYesBg: '#4caf50',  // 绿色
+                inlineConfirmYesBg: '#4caf50',
                 inlineConfirmYesText: '#fff',
-                inlineConfirmNoBg: '#f44336',   // 红色
-                inlineConfirmNoText: '#fff'
-            },
+                inlineConfirmNoBg: '#f44336',
+                inlineConfirmNoText: '#fff',
 
+                // 新增：拖拽把手内阴影、按钮悬停背景等
+                dragHandleInnerShadow: 'inset 0 1px 2px rgba(255,255,255,0.4)',
+                inlineConfirmBtnBg: 'rgba(255,255,255,0.07)',
+                inlineConfirmBtnHoverBg: 'rgba(255,255,255,0.12)',
+                floatingReopenBtnBorder: '#999',
+                jsonUrlColor: '#666',
+                jsonSizeColor: '#999',
+                progressWrapBg: '#f8f8f899',
+                panelBtnHoverBg: 'rgba(0, 0, 0, 0.1)'
+            },
             dark: {
                 // 面板
                 panelTitleTextColor: '#f8f8f8',
@@ -221,8 +272,8 @@
                 categoryTitleColor: '#f0f0f0',
                 searchLabelColor: '#ddd',
                 itemDividerColor: '#444',
-                panelMinimizeBtnColor: '#fff',
-                panelCloseBtnColor: '#ff5555',
+                panelMinimizeBtnColor: '#fff',    // 最小化按钮(在dark主题下)
+                panelCloseBtnColor: '#ff5555', // 关闭按钮(在dark主题下)
                 foldIconColor: '#ddd',
                 panelReopenBtnBg: '#444',
 
@@ -239,18 +290,27 @@
                 inlineConfirmBg: 'rgba(80,80,80,0.85)',
                 inlineConfirmText: '#fff',
                 inlineConfirmBorder: 'rgba(255,255,255,0.3)',
-                // 行内确认按钮对错颜色
                 inlineConfirmYesBg: '#4caf50',
                 inlineConfirmYesText: '#fff',
                 inlineConfirmNoBg: '#f44336',
-                inlineConfirmNoText: '#fff'
+                inlineConfirmNoText: '#fff',
+
+                // 新增
+                dragHandleInnerShadow: 'inset 0 1px 2px rgba(255,255,255,0.2)',
+                inlineConfirmBtnBg: 'rgba(255,255,255,0.07)',
+                inlineConfirmBtnHoverBg: 'rgba(255,255,255,0.12)',
+                floatingReopenBtnBorder: '#999',
+                jsonUrlColor: '#aaa',
+                jsonSizeColor: '#999',
+                progressWrapBg: '#6667',
+                panelBtnHoverBg: 'rgba(255,255,255,0.1)'
             }
         },
 
         // 默认主题
         defaultTheme: 'light',
 
-        // 已存在相同 URL 时的更新策略: 'larger' 或 'time'
+        // 已存在相同 URL 时的更新策略: 'larger' or 'time'
         captureUpdatePolicy: "larger",
 
         // 并发下载队列
@@ -261,16 +321,13 @@
         }
     };
 
+
     /************************************************************************
      * 2. 行内确认(inlineConfirm)，代替系统 confirm 弹窗
      ************************************************************************/
-    /**
-     * 行内确认面板出现在屏幕右下角, 主题颜色和字号都从 CONFIG 中获取.
-     * - 若未启用行内确认, 直接执行 onYes.
-     * - 超时后自动消失, 不阻塞JS.
-     */
     function inlineConfirm(question, onYes, onNo, timeoutMs = 5000) {
         if (!CONFIG.features.enableInlineConfirm) {
+            // 如果不启用行内确认，直接执行onYes
             if (onYes) onYes();
             return;
         }
@@ -279,14 +336,15 @@
         container.className = 'inline-confirm-container';
         container.innerHTML = `
             <div class="inline-confirm-text">${question}</div>
-            <button class="inline-confirm-btn inline-confirm-yes">${CONFIG.ICONS.confirmCheck}</button>
-            <button class="inline-confirm-btn inline-confirm-no">${CONFIG.ICONS.confirmCancel}</button>
+            <button class="inline-confirm-btn inline-confirm-yes" title="${BUTTON_MAP.CONFIRM_CHECK.title}">${BUTTON_MAP.CONFIRM_CHECK.icon}</button>
+            <button class="inline-confirm-btn inline-confirm-no"  title="${BUTTON_MAP.CONFIRM_CANCEL.title}">${BUTTON_MAP.CONFIRM_CANCEL.icon}</button>
         `;
         document.body.appendChild(container);
 
         const yesBtn = container.querySelector('.inline-confirm-yes');
         if (yesBtn) {
             yesBtn.addEventListener('click', () => {
+                UILogger.logMessage(`(inlineConfirm) 用户选择：确认 => ${question}`, 'info');
                 if (onYes) onYes();
                 cleanup();
             });
@@ -294,12 +352,14 @@
         const noBtn = container.querySelector('.inline-confirm-no');
         if (noBtn) {
             noBtn.addEventListener('click', () => {
+                UILogger.logMessage(`(inlineConfirm) 用户选择：取消 => ${question}`, 'info');
                 if (onNo) onNo();
                 cleanup();
             });
         }
 
         const timer = setTimeout(() => {
+            UILogger.logMessage(`(inlineConfirm) 超时自动消失 => ${question}`, 'debug');
             cleanup();
         }, timeoutMs);
 
@@ -308,6 +368,7 @@
             container.remove();
         }
     }
+
 
     /************************************************************************
      * 3. 通用函数（下载、JSON高亮、错误日志、复制等）
@@ -371,16 +432,22 @@
     function copyText(str) {
         try {
             navigator.clipboard.writeText(str);
+            UILogger.logMessage(`已复制文本到剪贴板`, 'info');
         } catch (e) {
             UILogger.logMessage(`复制到剪贴板失败: ${e.message}`, 'error');
         }
     }
+
 
     /************************************************************************
      * 4. ZIndex & GlobalPanels 管理
      ************************************************************************/
     const ZIndexManager = {
         currentZIndex: 999999,
+        /**
+         * 将某个元素提升到最前
+         * @param {HTMLElement} el 目标元素
+         */
         bringToFront(el) {
             this.currentZIndex++;
             el.style.zIndex = String(this.currentZIndex);
@@ -401,10 +468,37 @@
         }
     };
 
+
     /************************************************************************
      * 5. BaseFloatingPanel (面板基类)
+     *    新增onDragStart/onDragEnd/onDestroy/onReopen，优化事件回调与日志
      ************************************************************************/
     class BaseFloatingPanel {
+        /**
+         * @param {Object} options 初始化选项
+         * @param {string}    options.id                    面板ID(用于保存/加载位置尺寸)
+         * @param {string}    options.title                 面板标题
+         * @param {string|number} options.defaultLeft       初始left
+         * @param {string|number} options.defaultTop        初始top
+         * @param {number}    options.defaultWidth          初始宽度
+         * @param {number}    options.defaultHeight         初始高度
+         * @param {boolean}   options.showReopenBtn         是否显示"重新打开"按钮
+         * @param {string}    options.reopenBtnText         重新打开按钮文字
+         * @param {string}    options.reopenBtnTop          重新打开按钮的top定位
+         * @param {boolean}   options.allowResize           是否允许拖拽缩放
+         * @param {boolean}   options.destroyOnClose        关闭后是否直接销毁DOM
+         * @param {boolean}   options.doubleClickTitleToToggleMaximize 是否双击标题栏自动最大化切换
+         *
+         * @param {Function}  options.onClose               关闭回调
+         * @param {Function}  options.onMinimize            最小化回调
+         * @param {Function}  options.onRestore             还原回调
+         * @param {Function}  options.onFocus               面板获得焦点(点击)回调
+         * @param {Function}  options.onOpen                面板初次打开时的回调
+         * @param {Function}  options.onDestroy             面板真正destroy时的回调
+         * @param {Function}  options.onReopen              面板重新打开时的回调
+         * @param {Function}  options.onDragStart           拖拽开始回调
+         * @param {Function}  options.onDragEnd             拖拽结束回调
+         */
         constructor(options = {}) {
             const {
                 id = '',
@@ -417,29 +511,55 @@
                 reopenBtnText = '打开面板',
                 reopenBtnTop = '10px',
                 allowResize = true,
-                destroyOnClose = false, // 额外：预览面板时用
+                destroyOnClose = false,
+                doubleClickTitleToToggleMaximize = false,
+
                 onClose = () => {
                 },
                 onMinimize = () => {
                 },
                 onRestore = () => {
+                },
+                onFocus = () => {
+                },
+                onOpen = () => {
+                },
+                onDestroy = () => {
+                },
+                onReopen = () => {
+                },
+                onDragStart = () => {
+                },
+                onDragEnd = () => {
                 }
             } = options;
 
+            // 保存初始化参数
             this.id = id;
             this.title = title;
             this.showReopenBtn = showReopenBtn;
             this.reopenBtnText = reopenBtnText;
             this.reopenBtnTop = reopenBtnTop;
+            this.allowResize = allowResize;
+            this.destroyOnClose = destroyOnClose;
+            this.doubleClickTitleToToggleMaximize = doubleClickTitleToToggleMaximize;
+
+            // 回调
             this.onClose = onClose;
             this.onMinimize = onMinimize;
             this.onRestore = onRestore;
-            this.allowResize = allowResize;
-            this.destroyOnClose = destroyOnClose; // 新增
+            this.onFocus = onFocus;
+            this.onOpen = onOpen;
+            this.onDestroy = onDestroy;
+            this.onReopen = onReopen;
+            this.onDragStart = onDragStart;
+            this.onDragEnd = onDragEnd;
 
+            // 面板的状态记录
             this.panelState = {
                 minimized: false,
                 closed: false,
+                isMaximized: false,  // 可选：是否最大化
                 left: defaultLeft,
                 top: defaultTop,
                 width: defaultWidth + 'px',
@@ -451,39 +571,66 @@
                 this.initDOM(defaultHeight);
                 GlobalPanels.register(this);
                 this.loadState(defaultHeight);
-                this.initEvents();
+                this.initDragEvents();
                 this.initResizeObserver();
                 this.updatePanelBackgroundByTheme();
+                this.initTitlebarDoubleClick();
+
+                UILogger.logMessage(`[BaseFloatingPanel] 面板已创建并初始化: ${title}`, 'info');
+                this.onOpen(); // 初次创建时执行onOpen
             } catch (err) {
                 logErrorWithStack(err, 'BaseFloatingPanel constructor');
             }
         }
 
-        static createPanelButton({text = '', title = '', onClick = null}) {
+        /**
+         * 快速创建一个按钮，根据 BUTTON_MAP 的配置
+         * @param {string} btnKey 对应 BUTTON_MAP 的键
+         * @param {Function} onClick 点击回调
+         * @returns {HTMLButtonElement}
+         */
+        static createPanelButton(btnKey, onClick = null) {
+            const cfg = BUTTON_MAP[btnKey];
+            if (!cfg) {
+                UILogger.logMessage(`[createPanelButton] 未找到按钮配置: ${btnKey}`, 'warn');
+                const fallbackBtn = document.createElement('button');
+                fallbackBtn.textContent = btnKey;
+                if (onClick) fallbackBtn.addEventListener('click', onClick);
+                return fallbackBtn;
+            }
             const btn = document.createElement('button');
             btn.className = 'floating-panel-btn';
-            btn.textContent = text;
-            if (title) btn.title = title;
-            if (onClick) btn.addEventListener('click', onClick);
+            btn.textContent = cfg.icon;
+            btn.title = cfg.title;
+            if (onClick) {
+                btn.addEventListener('click', onClick);
+            }
             return btn;
         }
 
+        /**
+         * 初始化DOM结构
+         * @param {number} defaultHeight 面板默认高度
+         */
         initDOM(defaultHeight) {
+            // 主容器
             this.container = document.createElement('div');
             this.container.classList.add('floating-panel-container', 'floating-panel');
             if (this.id) this.container.id = this.id;
 
+            // 初始位置与尺寸
             this.container.style.left = this.panelState.left;
             this.container.style.top = this.panelState.top;
             this.container.style.width = this.panelState.width;
             this.container.style.height = this.panelState.height;
             this.container.style.opacity = String(CONFIG.panelLimit.defaultPanelOpacity);
 
+            // 如果不启用毛玻璃，则强制全不透明
             if (!CONFIG.panelLimit.enableBackdropBlur) {
-                // 强制不透明背景
                 const theme = UIManager?.globalSettings?.currentTheme || CONFIG.defaultTheme;
                 const themeVars = CONFIG.themes[theme] || CONFIG.themes.light;
-                const forcedBg = themeVars.panelContentBg.replace(/(\d+,\s*\d+,\s*\d+),\s*([\d\.]+)/, '$1,1');
+                let forcedBg = themeVars.panelContentBg;
+                forcedBg = forcedBg.replace(/(\d+,\s*\d+,\s*\d+),\s*([\d\.]+)/, '$1,1'); // 透明度改为1
                 this.container.style.background = forcedBg;
                 this.container.style.backdropFilter = 'none';
             }
@@ -505,40 +652,15 @@
             this.titleSpan.className = 'floating-panel-title';
             this.titleSpan.textContent = this.title;
 
-            // 最小化按钮图标(默认状态)
-            this.currentMinimizeIcon = CONFIG.ICONS.minimize;
-
-            // 滚动顶部按钮
-            this.btnScrollTop = BaseFloatingPanel.createPanelButton({
-                text: CONFIG.ICONS.scrollTop,
-                title: '滚动到顶部',
-                onClick: () => this.scrollToTop()
-            });
-
-            // 滚动底部按钮
-            this.btnScrollBottom = BaseFloatingPanel.createPanelButton({
-                text: CONFIG.ICONS.scrollBottom,
-                title: '滚动到底部',
-                onClick: () => this.scrollToBottom()
-            });
-
-            // 最小化按钮
-            this.btnMinimize = BaseFloatingPanel.createPanelButton({
-                text: this.currentMinimizeIcon,
-                title: '最小化或还原',
-                onClick: () => this.toggleMinimize()
-            });
+            // 标题栏按钮（右侧：滚动、最小化、关闭）
+            this.btnScrollTop = BaseFloatingPanel.createPanelButton('SCROLL_TOP', () => this.scrollToTop());
+            this.btnScrollBottom = BaseFloatingPanel.createPanelButton('SCROLL_BOTTOM', () => this.scrollToBottom());
+            this.btnMinimize = BaseFloatingPanel.createPanelButton('MINIMIZE', () => this.toggleMinimize());
             this.btnMinimize.classList.add('minimize-btn');
-
-            // 关闭按钮
-            this.btnClose = BaseFloatingPanel.createPanelButton({
-                text: CONFIG.ICONS.close,
-                title: '关闭面板',
-                onClick: () => this.close()
-            });
+            this.btnClose = BaseFloatingPanel.createPanelButton('CLOSE', () => this.close());
             this.btnClose.classList.add('close-btn');
 
-            // 将按钮依次插入标题栏
+            // 组装标题栏
             const fragTitle = document.createDocumentFragment();
             fragTitle.appendChild(this.dragHandle);
             fragTitle.appendChild(this.titleSpan);
@@ -551,7 +673,9 @@
             // 内容区
             this.contentEl = document.createElement('div');
             this.contentEl.className = 'floating-panel-content';
+            this.contentEl.style.padding = CONFIG.layout.floatingPanelContentPadding;
 
+            // 将标题栏和内容区插入容器
             this.container.appendChild(this.titlebar);
             this.container.appendChild(this.contentEl);
             document.body.appendChild(this.container);
@@ -561,19 +685,66 @@
             this.reopenBtn.className = 'floating-reopen-btn';
             this.reopenBtn.textContent = this.reopenBtnText;
             this.reopenBtn.style.top = this.reopenBtnTop;
-            // 默认不显示，只有当close()时才显示（前提是showReopenBtn=true）
-            this.reopenBtn.style.display = 'none';
+            this.reopenBtn.style.display = 'none'; // 默认隐藏
             document.body.appendChild(this.reopenBtn);
             this.reopenBtn.addEventListener('click', () => this.reopen());
         }
 
+        /**
+         * 是否允许双击标题栏实现最大化/还原
+         */
+        initTitlebarDoubleClick() {
+            if (!this.doubleClickTitleToToggleMaximize) return;
+            this.titlebar.addEventListener('dblclick', () => {
+                this.toggleMaximize();
+            });
+        }
+
+        /**
+         * 切换最大化 / 还原
+         * 示例用：若不需要，可自行移除
+         */
+        toggleMaximize() {
+            const isMax = this.panelState.isMaximized;
+            if (!isMax) {
+                // 记录当前rect
+                const rect = this.container.getBoundingClientRect();
+                this.panelState.oldLeft = rect.left + 'px';
+                this.panelState.oldTop = rect.top + 'px';
+                this.panelState.oldWidth = rect.width + 'px';
+                this.panelState.oldHeight = rect.height + 'px';
+                this.container.style.left = '0px';
+                this.container.style.top = '0px';
+                this.container.style.width = window.innerWidth + 'px';
+                this.container.style.height = window.innerHeight + 'px';
+                this.panelState.isMaximized = true;
+                UILogger.logMessage(`[BaseFloatingPanel] 最大化: ${this.title}`, 'info');
+            } else {
+                // 还原
+                this.container.style.left = this.panelState.oldLeft;
+                this.container.style.top = this.panelState.oldTop;
+                this.container.style.width = this.panelState.oldWidth;
+                this.container.style.height = this.panelState.oldHeight;
+                this.panelState.isMaximized = false;
+                UILogger.logMessage(`[BaseFloatingPanel] 取消最大化: ${this.title}`, 'info');
+            }
+        }
+
+        /**
+         * 根据当前主题更新面板背景等
+         */
         updatePanelBackgroundByTheme() {
             try {
                 const theme = UIManager?.globalSettings?.currentTheme || CONFIG.defaultTheme;
                 const themeVars = CONFIG.themes[theme] || CONFIG.themes.light;
-                this.container.style.backdropFilter = CONFIG.panelLimit.enableBackdropBlur ? 'blur(4px)' : 'none';
+                if (CONFIG.panelLimit.enableBackdropBlur) {
+                    this.container.style.backdropFilter = 'blur(4px)';
+                } else {
+                    this.container.style.backdropFilter = 'none';
+                }
                 let bg = themeVars.panelContentBg;
                 if (!CONFIG.panelLimit.enableBackdropBlur) {
+                    // 强制不透明
                     bg = bg.replace(/(\d+,\s*\d+,\s*\d+),\s*([\d\.]+)/, '$1,1');
                 }
                 this.container.style.background = bg;
@@ -582,43 +753,70 @@
             }
         }
 
-        initEvents() {
+        /**
+         * 初始化拖拽事件
+         */
+        initDragEvents() {
             let offsetX = 0, offsetY = 0;
+            let startLeft = 0, startTop = 0;
+            let mouseDown = false;
+
             const onMove = (e) => {
-                if (!this.dragging) return;
-                this.container.style.left = (e.clientX - offsetX) + 'px';
-                this.container.style.top = (e.clientY - offsetY) + 'px';
+                if (!mouseDown) return;
+                const deltaX = e.clientX - offsetX;
+                const deltaY = e.clientY - offsetY;
+                this.container.style.left = (startLeft + deltaX) + 'px';
+                this.container.style.top = (startTop + deltaY) + 'px';
             };
+
             const onUp = () => {
-                this.dragging = false;
+                if (!mouseDown) return;
+                mouseDown = false;
+                this.snapToEdges(); // 吸附
                 document.removeEventListener('mousemove', onMove);
                 document.removeEventListener('mouseup', onUp);
-                this.snapToEdges();
+
                 this.saveState();
+                UILogger.logMessage(`[BaseFloatingPanel] 拖拽结束 => left=${this.container.style.left}, top=${this.container.style.top}`, 'debug');
+                this.onDragEnd();
             };
 
             this.dragHandle.addEventListener('mousedown', e => {
                 e.preventDefault();
+                e.stopPropagation();
                 ZIndexManager.bringToFront(this.container);
+                this.onFocus(); // 用户点击了面板
+
+                offsetX = e.clientX;
+                offsetY = e.clientY;
                 const rect = this.container.getBoundingClientRect();
-                offsetX = e.clientX - rect.left;
-                offsetY = e.clientY - rect.top;
-                this.dragging = true;
+                startLeft = rect.left;
+                startTop = rect.top;
+                mouseDown = true;
+                this.onDragStart();
+
                 document.addEventListener('mousemove', onMove);
                 document.addEventListener('mouseup', onUp);
+                UILogger.logMessage(`[BaseFloatingPanel] 开始拖拽: ${this.title}`, 'debug');
             });
 
+            // 点击面板时置顶
             this.container.addEventListener('mousedown', () => {
                 ZIndexManager.bringToFront(this.container);
+                this.onFocus();
             });
         }
 
+        /**
+         * 若支持 ResizeObserver，则监听面板 resize
+         */
         initResizeObserver() {
             if (!this.allowResize) return;
             if (typeof ResizeObserver !== 'function') return;
+
             try {
                 this.resizeObserver = new ResizeObserver(() => {
-                    if (!this.panelState.minimized) {
+                    if (!this.panelState.minimized && !this.panelState.isMaximized) {
                         const rect = this.container.getBoundingClientRect();
                         this.panelState.restoredHeight = rect.height + 'px';
                     }
@@ -630,6 +828,9 @@
             }
         }
 
+        /**
+         * 边缘吸附逻辑
+         */
         snapToEdges() {
             try {
                 const rect = this.container.getBoundingClientRect();
@@ -639,11 +840,13 @@
                 const sh = window.innerHeight;
                 const t = CONFIG.panelLimit.snapThreshold;
 
+                // 与窗口四边吸附
                 if (left < t) left = 0;
                 else if (sw - (left + rect.width) < t) left = sw - rect.width;
                 if (top < t) top = 0;
                 else if (sh - (top + rect.height) < t) top = sh - rect.height;
 
+                // 与其他面板吸附
                 const panels = GlobalPanels.getAllPanels();
                 for (const p of panels) {
                     if (p === this || p.panelState.closed) continue;
@@ -652,19 +855,23 @@
                     const dxRight = Math.abs((left + rect.width) - r2.left);
                     const dyTop = Math.abs(top - r2.bottom);
                     const dyBottom = Math.abs((top + rect.height) - r2.top);
-                    if (dxLeft < t && (top + rect.height >= r2.top && top <= r2.bottom)) {
+                    const horizontallyOverlap = (top + rect.height >= r2.top && top <= r2.bottom);
+                    const verticallyOverlap = (left + rect.width >= r2.left && left <= r2.right);
+
+                    if (dxLeft < t && horizontallyOverlap) {
                         left = r2.right;
                     }
-                    if (dxRight < t && (top + rect.height >= r2.top && top <= r2.bottom)) {
+                    if (dxRight < t && horizontallyOverlap) {
                         left = r2.left - rect.width;
                     }
-                    if (dyTop < t && (left + rect.width >= r2.left && left <= r2.right)) {
+                    if (dyTop < t && verticallyOverlap) {
                         top = r2.bottom;
                     }
-                    if (dyBottom < t && (left + rect.width >= r2.left && left <= r2.right)) {
+                    if (dyBottom < t && verticallyOverlap) {
                         top = r2.top - rect.height;
                     }
                 }
+
                 this.container.style.left = left + 'px';
                 this.container.style.top = top + 'px';
             } catch (err) {
@@ -672,6 +879,10 @@
             }
         }
 
+        /**
+         * 从 localStorage 中加载面板状态
+         * @param {number} defaultHeight
+         */
         loadState(defaultHeight) {
             if (!this.id) return;
             try {
@@ -682,23 +893,36 @@
                 if (!st) return;
                 Object.assign(this.panelState, st);
 
+                // 兼容无效数据
                 if (!this.panelState.restoredHeight || parseInt(this.panelState.restoredHeight) < 10) {
                     this.panelState.restoredHeight = defaultHeight + 'px';
                 }
-                const {minimized, closed, left, top, width, height, restoredHeight} = this.panelState;
+                const {
+                    minimized, closed, left, top, width, height,
+                    restoredHeight, isMaximized
+                } = this.panelState;
+
                 this.container.style.left = left;
                 this.container.style.top = top;
                 this.container.style.width = width;
+
                 this.container.style.height = minimized
                     ? CONFIG.panelEffects.minimizedHeight
                     : (restoredHeight || height);
 
+                // 若最大化
+                if (isMaximized) {
+                    this.toggleMaximize(); // 恢复最大化
+                }
+
+                // 若最小化
                 if (minimized) {
                     this.container.classList.add('minimized');
                     this.contentEl.style.display = 'none';
-                    this.currentMinimizeIcon = CONFIG.ICONS.restore;
-                    this.btnMinimize.textContent = this.currentMinimizeIcon;
+                    this.btnMinimize.textContent = BUTTON_MAP.RESTORE.icon;
+                    this.btnMinimize.title = BUTTON_MAP.RESTORE.title;
                 }
+                // 若关闭
                 if (closed) {
                     this.container.style.display = 'none';
                     if (this.showReopenBtn) {
@@ -710,6 +934,9 @@
             }
         }
 
+        /**
+         * 将面板状态存储到 localStorage
+         */
         saveState() {
             if (!this.id) return;
             try {
@@ -717,7 +944,7 @@
                 this.panelState.left = this.container.style.left || (rect.left + 'px');
                 this.panelState.top = this.container.style.top || (rect.top + 'px');
                 this.panelState.width = this.container.style.width || (rect.width + 'px');
-                if (!this.panelState.minimized) {
+                if (!this.panelState.minimized && !this.panelState.isMaximized) {
                     this.panelState.restoredHeight = this.container.style.height || (rect.height + 'px');
                 }
                 this.panelState.height = this.container.style.height || (rect.height + 'px');
@@ -727,47 +954,58 @@
             }
         }
 
+        /**
+         * 设置面板标题
+         * @param {string} newTitle
+         */
         setTitle(newTitle) {
             this.titleSpan.textContent = newTitle;
         }
 
+        /**
+         * 切换面板最小化/还原
+         */
         toggleMinimize() {
             const willMinimize = !this.panelState.minimized;
             if (willMinimize) {
+                // 记录还原前的高度
                 const rect = this.container.getBoundingClientRect();
                 if (rect.height > 40) {
                     this.panelState.restoredHeight = rect.height + 'px';
                 }
-            }
-            this.panelState.minimized = willMinimize;
-            if (willMinimize) {
+                this.panelState.minimized = true;
                 this.container.classList.add('minimized');
                 this.container.style.height = CONFIG.panelEffects.minimizedHeight;
                 this.contentEl.style.display = 'none';
-                this.currentMinimizeIcon = CONFIG.ICONS.restore;
-                this.btnMinimize.textContent = this.currentMinimizeIcon;
+                this.btnMinimize.textContent = BUTTON_MAP.RESTORE.icon;
+                this.btnMinimize.title = BUTTON_MAP.RESTORE.title;
+                UILogger.logMessage(`[BaseFloatingPanel] 已最小化: ${this.title}`, 'info');
                 this.onMinimize();
             } else {
+                this.panelState.minimized = false;
                 this.container.classList.remove('minimized');
                 const rh = this.panelState.restoredHeight || '200px';
                 this.container.style.height = rh;
                 this.contentEl.style.display = 'block';
-                this.currentMinimizeIcon = CONFIG.ICONS.minimize;
-                this.btnMinimize.textContent = this.currentMinimizeIcon;
+                this.btnMinimize.textContent = BUTTON_MAP.MINIMIZE.icon;
+                this.btnMinimize.title = BUTTON_MAP.MINIMIZE.title;
+                UILogger.logMessage(`[BaseFloatingPanel] 已还原: ${this.title}`, 'info');
                 this.onRestore();
             }
             this.saveState();
         }
 
+        /**
+         * 关闭面板
+         */
         close() {
-            // 如果是“destroyOnClose”模式(例如临时预览面板), 直接destroy, 不出现reopen按钮
             if (this.destroyOnClose) {
-                // 调用 onClose 回调
+                // 直接销毁模式
+                UILogger.logMessage(`[BaseFloatingPanel] destroyOnClose => ${this.title}`, 'info');
                 this.onClose();
                 this.destroy();
                 return;
             }
-
             // 否则正常“关闭”逻辑
             this.panelState.closed = true;
             this.panelState.minimized = false;
@@ -775,10 +1013,14 @@
             if (this.showReopenBtn) {
                 this.reopenBtn.style.display = 'block';
             }
+            UILogger.logMessage(`[BaseFloatingPanel] 已关闭: ${this.title}`, 'info');
             this.onClose();
             this.saveState();
         }
 
+        /**
+         * 重新打开面板
+         */
         reopen() {
             this.panelState.closed = false;
             this.container.style.display = 'flex';
@@ -789,36 +1031,58 @@
                 this.container.classList.add('minimized');
                 this.container.style.height = CONFIG.panelEffects.minimizedHeight;
                 this.contentEl.style.display = 'none';
-                this.currentMinimizeIcon = CONFIG.ICONS.restore;
+                this.btnMinimize.textContent = BUTTON_MAP.RESTORE.icon;
+                this.btnMinimize.title = BUTTON_MAP.RESTORE.title;
             } else {
                 this.container.classList.remove('minimized');
                 this.contentEl.style.display = 'block';
-                this.currentMinimizeIcon = CONFIG.ICONS.minimize;
+                this.btnMinimize.textContent = BUTTON_MAP.MINIMIZE.icon;
+                this.btnMinimize.title = BUTTON_MAP.MINIMIZE.title;
                 this.container.style.height = this.panelState.restoredHeight;
             }
-            this.btnMinimize.textContent = this.currentMinimizeIcon;
             this.updatePanelBackgroundByTheme();
             this.saveState();
+            UILogger.logMessage(`[BaseFloatingPanel] 重新打开: ${this.title}`, 'info');
+            this.onReopen();
         }
 
+        /**
+         * 完全销毁面板(从DOM中移除)
+         */
         destroy() {
-            this.container.remove();
             GlobalPanels.unregister(this);
+            if (this.container) {
+                this.container.remove();
+            }
             if (this.reopenBtn) {
                 this.reopenBtn.remove();
             }
+            UILogger.logMessage(`[BaseFloatingPanel] 已销毁: ${this.title}`, 'info');
+            this.onDestroy();
         }
 
+        /**
+         * 内容区滚动到顶部
+         */
         scrollToTop() {
             this.contentEl.scrollTop = 0;
+            UILogger.logMessage(`[BaseFloatingPanel] scrollToTop: ${this.title}`, 'debug');
         }
 
+        /**
+         * 内容区滚动到底部
+         */
         scrollToBottom() {
             this.contentEl.scrollTop = this.contentEl.scrollHeight;
+            UILogger.logMessage(`[BaseFloatingPanel] scrollToBottom: ${this.title}`, 'debug');
         }
 
+        /**
+         * 静态方法: 打开一个临时预览面板(可用于JSON或其他文本)
+         * @param {string} title
+         * @param {string} jsonString
+         */
         static openPreviewPanel(title, jsonString) {
-            // 这里的 this 是类本身
             // 如果上一次还留有 window.__globalEphemeralPanel，就先销毁它
             if (window.__globalEphemeralPanel) {
                 window.__globalEphemeralPanel.destroy();
@@ -831,10 +1095,10 @@
                 defaultTop: '120px',
                 defaultWidth: 600,
                 defaultHeight: 400,
-                showReopenBtn: false,  // 关键：不需要“打开面板”按钮
-                destroyOnClose: true,  // 关键：关闭后直接销毁
+                showReopenBtn: false,  // 不需要“打开面板”按钮
+                destroyOnClose: true,  // 关闭后直接销毁
                 onClose: () => {
-                    // 关闭时把全局引用清空
+                    // 清空全局引用
                     if (window.__globalEphemeralPanel === ephemeralPanel) {
                         window.__globalEphemeralPanel = null;
                     }
@@ -846,23 +1110,32 @@
                 const obj = JSON.parse(jsonString);
                 pretty = JSON.stringify(obj, null, 2);
             } catch (e) {
-                // 如果 parse 失败，就保持原字符串
+                // 若 parse 失败，就保持原字符串
             }
             const html = `<div class="json-preview">${highlightJson(pretty)}</div>`;
 
             ephemeralPanel.contentEl.innerHTML = `
-        <div class="json-preview-content" style="flex:1;overflow:auto;padding:8px;">${html}</div>
-    `;
+                <div class="json-preview-content" style="flex:1;overflow:auto;padding:8px;">${html}</div>
+            `;
             ephemeralPanel.updatePanelBackgroundByTheme();
             ephemeralPanel.container.style.zIndex = String(ZIndexManager.currentZIndex + 1);
             window.__globalEphemeralPanel = ephemeralPanel;
+
+            UILogger.logMessage(`[BaseFloatingPanel] 打开临时预览面板 => ${title}`, 'info');
         }
     }
+
 
     /************************************************************************
      * 6. 并发下载队列(DownloadQueue) - 附加日志
      ************************************************************************/
     class DownloadQueue {
+        /**
+         * @param {Object} options
+         * @param {number} options.maxConcurrent 并发数
+         * @param {number} options.maxRetry 重试次数
+         * @param {number} options.retryDelay 重试延时
+         */
         constructor(options = {}) {
             this.maxConcurrent = options.maxConcurrent || 3;
             this.maxRetry = options.maxRetry || 3;
@@ -877,6 +1150,11 @@
             };
         }
 
+        /**
+         * 添加任务
+         * @param {any}      taskInfo  任务信息(自定义)
+         * @param {Function} taskFn    必须返回 Promise 的函数
+         */
         addTask(taskInfo, taskFn) {
             this.queue.push({
                 info: taskInfo,
@@ -888,6 +1166,7 @@
         }
 
         start() {
+            UILogger.logMessage(`[DownloadQueue] start: total=${this.queue.length}`, 'debug');
             this.next();
         }
 
@@ -895,6 +1174,7 @@
             if (this.queue.length === 0 && this.activeCount === 0) {
                 const successCount = this.results.filter(r => r.success).length;
                 const failCount = this.results.length - successCount;
+                UILogger.logMessage(`[DownloadQueue] 完成: 成功=${successCount}, 失败=${failCount}`, failCount > 0 ? 'warn' : 'info');
                 this.onComplete(successCount, failCount, this.results);
                 return;
             }
@@ -916,14 +1196,14 @@
                 task.retryCount++;
                 task.error = err;
                 if (task.retryCount <= this.maxRetry) {
-                    UILogger.logMessage(`DownloadQueue任务失败, 重试(${task.retryCount}): ${err.message}`, 'warn');
+                    UILogger.logMessage(`[DownloadQueue] 任务失败, 重试(${task.retryCount}): ${err.message}`, 'warn');
                     setTimeout(() => {
                         this.activeCount--;
                         this.queue.unshift(task);
                         this.next();
                     }, this.retryDelay);
                 } else {
-                    UILogger.logMessage(`DownloadQueue任务彻底失败: ${err.message}`, 'error');
+                    UILogger.logMessage(`[DownloadQueue] 任务彻底失败: ${err.message}`, 'error');
                     this.results.push(task);
                     this.activeCount--;
                     const doneCount = this.results.length;
@@ -937,8 +1217,9 @@
         }
     }
 
+
     /************************************************************************
-     * 7. 日志系统、请求拦截器、PoW 解析
+     * 7. 日志系统（UILogger）、请求拦截器、PoW 解析
      ************************************************************************/
     const UILogger = {
         logEntries: [],
@@ -958,6 +1239,7 @@
                 }
             } catch (e) {
             }
+
             this.createLogPanel();
         },
 
@@ -975,44 +1257,31 @@
                 allowResize: true,
                 onClose: () => this.logMessage('日志面板已关闭', 'info'),
                 onMinimize: () => this.logMessage('日志面板已最小化', 'info'),
-                onRestore: () => this.logMessage('日志面板已还原', 'info')
+                onRestore: () => this.logMessage('日志面板已还原', 'info'),
+                onFocus: () => this.logMessage('日志面板获得焦点', 'debug'),
+                onOpen: () => this.logMessage('日志面板创建完成', 'debug')
             });
 
-            const btnDownload = BaseFloatingPanel.createPanelButton({
-                text: CONFIG.ICONS.downloadLog,
-                title: '下载日志文件到本地',
-                onClick: () => this.downloadLogs()
+            // 顶部按钮：下载日志、清空日志、自动滚动、换行开关
+            const btnDownload = BaseFloatingPanel.createPanelButton('DOWNLOAD_LOG', () => this.downloadLogs());
+            const btnClear = BaseFloatingPanel.createPanelButton('CLEAR_LOGS', () => {
+                inlineConfirm('确定要清空日志吗？此操作不可恢复。', () => {
+                    this.clearLogs();
+                    this.logMessage('已清空日志', 'warn');
+                });
             });
-            const btnClear = BaseFloatingPanel.createPanelButton({
-                text: CONFIG.ICONS.trash,
-                title: '清空全部日志记录',
-                onClick: () => {
-                    inlineConfirm('确定要清空日志吗？此操作不可恢复。', () => {
-                        this.clearLogs();
-                        this.logMessage('已清空日志', 'warn');
-                    });
-                }
-            });
-            const btnAutoScroll = BaseFloatingPanel.createPanelButton({
-                text: '⤵️',
-                title: '自动滚动到最新日志开关',
-                onClick: () => {
-                    this.autoScroll = !this.autoScroll;
-                    this.logMessage(`自动滚动已切换为 ${this.autoScroll}`, 'info');
-                    btnAutoScroll.style.opacity = this.autoScroll ? '1' : '0.5';
-                }
+            const btnAutoScroll = BaseFloatingPanel.createPanelButton('AUTO_SCROLL', () => {
+                this.autoScroll = !this.autoScroll;
+                this.logMessage(`自动滚动已切换为 ${this.autoScroll}`, 'info');
+                btnAutoScroll.style.opacity = this.autoScroll ? '1' : '0.5';
             });
             btnAutoScroll.style.opacity = this.autoScroll ? '1' : '0.5';
 
-            const btnWrap = BaseFloatingPanel.createPanelButton({
-                text: '↩️',
-                title: '换行显示日志开关',
-                onClick: () => {
-                    this.wrapLines = !this.wrapLines;
-                    this.updateWrapMode();
-                    this.logMessage(`换行模式已切换为 ${this.wrapLines}`, 'info');
-                    btnWrap.style.opacity = this.wrapLines ? '1' : '0.5';
-                }
+            const btnWrap = BaseFloatingPanel.createPanelButton('WRAP_LINES', () => {
+                this.wrapLines = !this.wrapLines;
+                this.updateWrapMode();
+                this.logMessage(`换行模式已切换为 ${this.wrapLines}`, 'info');
+                btnWrap.style.opacity = this.wrapLines ? '1' : '0.5';
             });
             btnWrap.style.opacity = this.wrapLines ? '1' : '0.5';
 
@@ -1023,6 +1292,7 @@
             fragTitle.appendChild(btnWrap);
             this.logPanel.titlebar.insertBefore(fragTitle, this.logPanel.btnMinimize);
 
+            // 日志列表
             const ul = document.createElement('ul');
             ul.className = 'log-panel-list';
             this.logListEl = ul;
@@ -1030,7 +1300,8 @@
 
             // 加载旧日志
             this.logEntries.forEach(ent => {
-                ul.appendChild(this.createLogLi(ent));
+                const level = this.getLogLevel(ent);
+                ul.appendChild(this.createLogLi(ent, level));
             });
             this.scrollToBottomIfNeeded();
         },
@@ -1044,16 +1315,20 @@
             }
         },
 
+        /**
+         * 记录日志
+         * @param {string} msg
+         * @param {string} level debug/info/warn/error
+         */
         logMessage(msg, level = 'info') {
             const timeStr = new Date().toLocaleTimeString();
             const line = `[${timeStr}][${level}] ${msg}`;
             this.logEntries.push(line);
 
-            // 若超出最大限制,移除最旧
+            // 若超出最大限制，则移除最旧
             if (CONFIG.features.maxLogEntries > 0 && this.logEntries.length > CONFIG.features.maxLogEntries) {
                 this.logEntries.splice(0, this.logEntries.length - CONFIG.features.maxLogEntries);
             }
-
             try {
                 localStorage.setItem(CONFIG.logStorageKey, JSON.stringify(this.logEntries));
             } catch (e) {
@@ -1066,19 +1341,27 @@
             }
         },
 
+        getLogLevel(line) {
+            const re = /^\[.+?\]\[([^]+?)\]/;
+            const m = line.match(re);
+            if (m) return m[1];
+            return 'info';
+        },
+
         createLogLi(line, level = 'info') {
             const li = document.createElement('li');
+            li.className = 'log-line';
+
             const themeName = UIManager?.globalSettings?.currentTheme || CONFIG.defaultTheme;
             const themeVars = CONFIG.themes[themeName] || CONFIG.themes.light;
             const multiColor = themeVars.logMultiColor !== false;
+
             if (multiColor) {
+                // 拆分出时间、级别、消息
                 const re = /^\[([^]+?)\]\[([^]+?)\]\s(.*)$/;
                 const m = re.exec(line);
                 if (m) {
-                    const timePart = m[1];
-                    const lvlPart = m[2];
-                    const msgPart = m[3];
-
+                    const [_, timePart, lvlPart, msgPart] = m;
                     const timeSpan = document.createElement('span');
                     timeSpan.style.color = '#999';
                     timeSpan.textContent = `[${timePart}]`;
@@ -1139,7 +1422,7 @@
         }
     };
 
-    // 请求拦截
+    // 请求拦截器
     const RequestInterceptor = {
         capturedRequests: [],
         starUuid: '',
@@ -1152,6 +1435,7 @@
         overrideXHR() {
             const origOpen = XMLHttpRequest.prototype.open;
             const origSend = XMLHttpRequest.prototype.send;
+
             XMLHttpRequest.prototype.open = function (method, url, ...rest) {
                 this._requestMethod = method;
                 this._requestUrl = url;
@@ -1220,12 +1504,12 @@
         shouldCapture(url) {
             return !!url;
         },
+
         findCapturedItemByUrl(url) {
             return this.capturedRequests.find(it => it.url === url);
         },
 
         addCaptured(url, content, method, status, headersObj) {
-            // 根据配置检查大小
             const sizeKB = content.length / 1024;
             if (CONFIG.features.maxJSONSizeKB > 0 && sizeKB > CONFIG.features.maxJSONSizeKB) {
                 if (CONFIG.features.autoCleanupOnLarge) {
@@ -1237,6 +1521,7 @@
             }
             const existing = this.findCapturedItemByUrl(url);
             if (existing) {
+                // 若已存在则按策略更新
                 const policy = CONFIG.captureUpdatePolicy;
                 if (policy === 'larger') {
                     if (content.length > existing.content.length) {
@@ -1259,23 +1544,32 @@
                 }
                 return;
             }
+
             let fn = url.split('/').pop().split('?')[0] || 'download';
             try {
                 fn = decodeURIComponent(fn);
             } catch (e) {
             }
-            const kb = sizeKB.toFixed(2);
 
+            const kb = sizeKB.toFixed(2);
             let category = 'other';
-            if (this.isStarUrl(url, fn)) category = 'star';
-            else if (/\/backend-api\//i.test(url)) category = 'backend';
-            else if (/^https?:\/\/[^/]*api\./i.test(url)) category = 'api';
-            else if (/^https?:\/\/[^/]*public\./i.test(url)) category = 'public';
+            if (this.isStarUrl(url, fn)) {
+                category = 'star';
+            } else if (/\/backend-api\//i.test(url)) {
+                category = 'backend';
+            } else if (/^https?:\/\/[^/]*api\./i.test(url)) {
+                category = 'api';
+            } else if (/^https?:\/\/[^/]*public\./i.test(url)) {
+                category = 'public';
+            }
 
             const item = {
-                url, content, filename: fn,
-                sizeKB: kb, method, status,
-                headersObj, category
+                url, content,
+                filename: fn,
+                sizeKB: kb,
+                method, status,
+                headersObj,
+                category
             };
             this.capturedRequests.push(item);
             UILogger.logMessage(`捕获JSON (${method}) [${status || '--'}]: ${url}`, 'info');
@@ -1304,6 +1598,7 @@
         }
     };
 
+    // PoW 解析示例(可根据需要定制)
     const PoWParser = {
         currentDifficulty: '',
         checkDifficulty(raw) {
@@ -1319,6 +1614,7 @@
         }
     };
 
+
     /************************************************************************
      * 8. SpecialDataParser(Claude/ChatGPT) - 特殊数据解析
      ************************************************************************/
@@ -1328,6 +1624,7 @@
         chatgptTasksData: [],
 
         parse(reqUrl, raw) {
+            // 解析Claude列表
             for (const re of CONFIG.claudeListUrlPatterns) {
                 if (re.test(reqUrl)) {
                     this.parseClaudeArray(reqUrl, raw);
@@ -1335,11 +1632,13 @@
                     return;
                 }
             }
+            // 解析ChatGPT对话列表
             if (/\/backend-api\/conversations\?/i.test(reqUrl)) {
                 this.parseChatGPTList(raw);
                 UIManager.updateSpecialDataPanel();
                 return;
             }
+            // 解析ChatGPT任务
             if (/\/backend-api\/tasks$/i.test(reqUrl)) {
                 this.parseChatGPTTasks(raw);
                 UIManager.updateSpecialDataPanel();
@@ -1489,6 +1788,7 @@
         }
     };
 
+
     /************************************************************************
      * 9. UIManager: 生成 JSON面板 & 特殊数据面板
      ************************************************************************/
@@ -1505,6 +1805,7 @@
                 }
             } catch (e) {
             }
+
             this.applyTheme(this.globalSettings.currentTheme);
             this.applyDimensionsAndEffects();
             this.createJsonPanel();
@@ -1518,52 +1819,68 @@
             }
         },
 
+        /**
+         * 应用主题
+         * @param {string} themeName
+         */
         applyTheme(themeName) {
             const themeObj = CONFIG.themes[themeName] || CONFIG.themes.light;
             const rootStyle = document.documentElement.style;
-            // 逐条写入CSS变量
+            // 将 themeObj 的 key => 转成 --xxx
             Object.entries(themeObj).forEach(([k, v]) => {
                 rootStyle.setProperty(`--${k.replace(/([A-Z])/g, '-$1').toLowerCase()}`, v);
             });
             this.globalSettings.currentTheme = themeName;
             this.saveGlobalSettings();
-            // 更新所有面板背景
+
+            // 更新所有已存在面板的背景
             const panels = GlobalPanels.getAllPanels();
             for (const p of panels) {
                 if (typeof p.updatePanelBackgroundByTheme === 'function') {
                     p.updatePanelBackgroundByTheme();
                 }
             }
+            UILogger.logMessage(`[UIManager] 已切换主题 => ${themeName}`, 'info');
         },
 
+        /**
+         * 将字号、间距、阴影等写入CSS变量
+         */
         applyDimensionsAndEffects() {
             const rootStyle = document.documentElement.style;
+
             // 字号
             Object.entries(CONFIG.fontSizes).forEach(([key, val]) => {
                 rootStyle.setProperty(`--font-size-${key}`, val);
             });
+
             // 图标尺寸
             Object.entries(CONFIG.iconSizes).forEach(([key, val]) => {
                 rootStyle.setProperty(`--button-size-${key}`, val);
             });
+
             // 面板特效
             rootStyle.setProperty('--border-radius', CONFIG.panelEffects.borderRadius);
             rootStyle.setProperty('--box-shadow-default', CONFIG.panelEffects.defaultBoxShadow);
             rootStyle.setProperty('--box-shadow-hover', CONFIG.panelEffects.hoverBoxShadow);
             rootStyle.setProperty('--titlebar-bottom-border', CONFIG.panelEffects.titlebarBottomBorder);
-            // 额外写入最小化高度
-            document.documentElement.style.setProperty('--minimized-height', CONFIG.panelEffects.minimizedHeight);
+            rootStyle.setProperty('--minimized-height', CONFIG.panelEffects.minimizedHeight);
+
+            // 额外布局/间距
+            rootStyle.setProperty('--drag-handle-size', CONFIG.layout.dragHandleSize);
+            rootStyle.setProperty('--drag-handle-margin', CONFIG.layout.dragHandleMargin);
+            rootStyle.setProperty('--inline-confirm-padding', CONFIG.layout.inlineConfirmPadding);
+            rootStyle.setProperty('--inline-confirm-button-padding', CONFIG.layout.inlineConfirmButtonPadding);
+            rootStyle.setProperty('--progress-bar-height', CONFIG.layout.progressBarHeight);
         },
 
+        /**
+         * 创建一个主题切换按钮
+         */
         createThemeToggleButton() {
-            return BaseFloatingPanel.createPanelButton({
-                text: CONFIG.ICONS.themeSwitch,
-                title: '切换亮/暗主题',
-                onClick: () => {
-                    const newTheme = (this.globalSettings.currentTheme === 'light') ? 'dark' : 'light';
-                    this.applyTheme(newTheme);
-                    UILogger.logMessage(`已切换为 ${newTheme} 主题`, 'info');
-                }
+            return BaseFloatingPanel.createPanelButton('THEME_TOGGLE', () => {
+                const newTheme = (this.globalSettings.currentTheme === 'light') ? 'dark' : 'light';
+                this.applyTheme(newTheme);
             });
         },
 
@@ -1581,22 +1898,27 @@
                 allowResize: true,
                 onClose: () => UILogger.logMessage('JSON面板已关闭', 'info'),
                 onMinimize: () => UILogger.logMessage('JSON面板已最小化', 'info'),
-                onRestore: () => UILogger.logMessage('JSON面板已还原', 'info')
+                onRestore: () => UILogger.logMessage('JSON面板已还原', 'info'),
+                onFocus: () => UILogger.logMessage('JSON面板获得焦点', 'debug'),
+                onOpen: () => UILogger.logMessage('JSON面板创建完成', 'debug'),
+                // 示例：可开启双击标题栏最大化/还原
+                doubleClickTitleToToggleMaximize: true
             });
 
+            // 主题切换按钮
             const btnTheme = this.createThemeToggleButton();
-            const btnToggleCat = BaseFloatingPanel.createPanelButton({
-                text: CONFIG.ICONS.gear,
-                title: '按分类显示或不分类',
-                onClick: () => {
-                    this.globalSettings.useCategories = !this.globalSettings.useCategories;
-                    this.saveGlobalSettings();
-                    this.rebuildJsonPanelContent();
-                    UILogger.logMessage(`切换分类显示: ${this.globalSettings.useCategories}`, 'info');
-                }
+            // 分类显示切换
+            const btnToggleCat = BaseFloatingPanel.createPanelButton('TOGGLE_CAT', () => {
+                this.globalSettings.useCategories = !this.globalSettings.useCategories;
+                this.saveGlobalSettings();
+                this.rebuildJsonPanelContent();
+                UILogger.logMessage(`切换分类显示: ${this.globalSettings.useCategories}`, 'info');
             });
+
+            // 将两个新增按钮插到最小化按钮之前
             this.jsonPanel.titlebar.insertBefore(btnToggleCat, this.jsonPanel.btnMinimize);
             this.jsonPanel.titlebar.insertBefore(btnTheme, btnToggleCat);
+
             this.rebuildJsonPanelContent();
         },
 
@@ -1604,6 +1926,7 @@
             const contentWrap = this.jsonPanel.contentEl;
             contentWrap.innerHTML = '';
 
+            // 搜索栏
             const searchWrap = document.createElement('div');
             searchWrap.className = 'json-panel-search-wrap';
 
@@ -1624,6 +1947,7 @@
             searchWrap.appendChild(inp);
             contentWrap.appendChild(searchWrap);
 
+            // 判断分类或不分类
             if (this.globalSettings.useCategories) {
                 this.buildCategory('星标', 'star', contentWrap);
                 this.buildCategory('Backend API', 'backend', contentWrap);
@@ -1639,9 +1963,11 @@
         buildCategory(title, catKey, parent) {
             const wrapper = document.createElement('div');
             wrapper.className = 'json-panel-category';
+            wrapper.style.margin = CONFIG.layout.categoryMargin;
 
             const header = document.createElement('div');
             header.className = 'json-panel-category-header';
+            header.style.padding = CONFIG.layout.categoryHeaderPadding;
 
             const titleSpan = document.createElement('span');
             titleSpan.className = 'title';
@@ -1649,56 +1975,54 @@
 
             const btnsWrap = document.createElement('div');
 
-            const btnDownload = BaseFloatingPanel.createPanelButton({
-                text: CONFIG.ICONS.downloadAll,
-                title: `批量下载: ${title}`,
-                onClick: () => {
-                    const list = this.getRequestsByCategory(catKey);
-                    if (!list.length) {
-                        UILogger.logMessage(`【${title}】无可下载数据`, 'warn');
-                        return;
+            // 批量下载
+            const btnDownload = BaseFloatingPanel.createPanelButton('DOWNLOAD_ALL', () => {
+                const list = this.getRequestsByCategory(catKey);
+                if (!list.length) {
+                    UILogger.logMessage(`【${title}】无可下载数据`, 'warn');
+                    return;
+                }
+                list.forEach(item => this.downloadSingle(item));
+                UILogger.logMessage(`批量下载完成,分类【${title}】共${list.length}个`, 'info');
+            });
+            btnDownload.title = `批量下载: ${title}`;
+
+            // 清空此分类
+            const btnClear = BaseFloatingPanel.createPanelButton('CLEAR_CATEGORY', () => {
+                inlineConfirm(`确定要清空分类「${title}」吗？此操作不可恢复。`, () => {
+                    if (catKey === 'all') {
+                        RequestInterceptor.capturedRequests = [];
+                    } else {
+                        this.removeRequestsByCategory(catKey);
                     }
-                    list.forEach(item => this.downloadSingle(item));
-                    UILogger.logMessage(`批量下载完成,分类【${title}】共${list.length}个`, 'info');
-                }
+                    this.updateLists();
+                    UILogger.logMessage(`已清空分类: ${title}`, 'warn');
+                });
             });
+            btnClear.title = `清空: ${title}`;
 
-            const btnClear = BaseFloatingPanel.createPanelButton({
-                text: CONFIG.ICONS.trash,
-                title: `清空: ${title}`,
-                onClick: () => {
-                    inlineConfirm(`确定要清空分类「${title}」吗？此操作不可恢复。`, () => {
-                        if (catKey === 'all') {
-                            RequestInterceptor.capturedRequests = [];
-                        } else {
-                            this.removeRequestsByCategory(catKey);
-                        }
-                        this.updateLists();
-                        UILogger.logMessage(`已清空分类: ${title}`, 'warn');
-                    });
-                }
-            });
-
+            // 按名称排序
             let sortNameAsc = true;
-            const btnSortName = BaseFloatingPanel.createPanelButton({
-                text: '🔼',
-                title: `按名称排序 - ${title}`,
-                onClick: () => {
-                    this.sortCategory(catKey, 'name', sortNameAsc);
-                    sortNameAsc = !sortNameAsc;
-                    btnSortName.textContent = sortNameAsc ? '🔼' : '🔽';
-                }
+            const btnSortName = document.createElement('button');
+            btnSortName.className = 'floating-panel-btn';
+            btnSortName.textContent = BUTTON_MAP.SORT_ASC.icon;
+            btnSortName.title = `按名称排序 - ${title}`;
+            btnSortName.addEventListener('click', () => {
+                this.sortCategory(catKey, 'name', sortNameAsc);
+                sortNameAsc = !sortNameAsc;
+                btnSortName.textContent = sortNameAsc ? BUTTON_MAP.SORT_ASC.icon : BUTTON_MAP.SORT_DESC.icon;
             });
 
+            // 按大小排序
             let sortSizeAsc = true;
-            const btnSortSize = BaseFloatingPanel.createPanelButton({
-                text: '🔼',
-                title: `按大小排序 - ${title}`,
-                onClick: () => {
-                    this.sortCategory(catKey, 'size', sortSizeAsc);
-                    sortSizeAsc = !sortSizeAsc;
-                    btnSortSize.textContent = sortSizeAsc ? '🔼' : '🔽';
-                }
+            const btnSortSize = document.createElement('button');
+            btnSortSize.className = 'floating-panel-btn';
+            btnSortSize.textContent = BUTTON_MAP.SORT_ASC.icon;
+            btnSortSize.title = `按大小排序 - ${title}`;
+            btnSortSize.addEventListener('click', () => {
+                this.sortCategory(catKey, 'size', sortSizeAsc);
+                sortSizeAsc = !sortSizeAsc;
+                btnSortSize.textContent = sortSizeAsc ? BUTTON_MAP.SORT_ASC.icon : BUTTON_MAP.SORT_DESC.icon;
             });
 
             btnsWrap.appendChild(btnDownload);
@@ -1716,6 +2040,7 @@
             wrapper.appendChild(listEl);
             parent.appendChild(wrapper);
 
+            // 保存引用
             switch (catKey) {
                 case 'star':
                     this.starListEl = listEl;
@@ -1740,6 +2065,7 @@
 
         updateLists() {
             if (!this.jsonPanel) return;
+
             if (this.globalSettings.useCategories) {
                 if (this.starListEl) {
                     this.starListEl.innerHTML = '';
@@ -1822,7 +2148,7 @@
             }
 
             if (cat !== 'all') {
-                // 先移除这个分类的，再把排好序的插回去
+                // 移除此分类旧数据，再插入排好序的新数据
                 this.removeRequestsByCategory(cat);
                 arr.forEach(it => RequestInterceptor.capturedRequests.push(it));
             } else {
@@ -1834,12 +2160,13 @@
         createRequestItem(item) {
             const li = document.createElement('li');
             li.className = 'json-panel-item';
+            li.style.padding = CONFIG.layout.itemPadding;
 
             // 复制
             const btnCopy = document.createElement('span');
             btnCopy.className = 'icon';
-            btnCopy.textContent = CONFIG.ICONS.copy;
-            btnCopy.title = '复制此JSON到剪贴板';
+            btnCopy.textContent = BUTTON_MAP.COPY_JSON.icon;
+            btnCopy.title = BUTTON_MAP.COPY_JSON.title;
             btnCopy.addEventListener('click', () => {
                 copyText(item.content);
                 UILogger.logMessage('复制JSON: ' + item.filename, 'info');
@@ -1848,8 +2175,8 @@
             // 下载
             const btnDownload = document.createElement('span');
             btnDownload.className = 'icon';
-            btnDownload.textContent = CONFIG.ICONS.downloadAll;
-            btnDownload.title = '下载此JSON文件';
+            btnDownload.textContent = BUTTON_MAP.DOWNLOAD_JSON.icon;
+            btnDownload.title = BUTTON_MAP.DOWNLOAD_JSON.title;
             btnDownload.addEventListener('click', () => {
                 this.downloadSingle(item);
             });
@@ -1857,8 +2184,8 @@
             // 预览
             const btnPreview = document.createElement('span');
             btnPreview.className = 'icon';
-            btnPreview.textContent = CONFIG.ICONS.preview;
-            btnPreview.title = '预览此JSON';
+            btnPreview.textContent = BUTTON_MAP.PREVIEW_JSON.icon;
+            btnPreview.title = BUTTON_MAP.PREVIEW_JSON.title;
             btnPreview.addEventListener('click', () => {
                 this.previewJson(item);
             });
@@ -1866,8 +2193,8 @@
             // 删除
             const btnRemoveItem = document.createElement('span');
             btnRemoveItem.className = 'icon';
-            btnRemoveItem.textContent = CONFIG.ICONS.removeItem;
-            btnRemoveItem.title = '删除此条抓取记录';
+            btnRemoveItem.textContent = BUTTON_MAP.REMOVE_ITEM.icon;
+            btnRemoveItem.title = BUTTON_MAP.REMOVE_ITEM.title;
             btnRemoveItem.addEventListener('click', () => {
                 inlineConfirm(`确定删除此记录？\n\nURL: ${item.url}`, () => {
                     const idx = RequestInterceptor.capturedRequests.indexOf(item);
@@ -1944,37 +2271,28 @@
                 allowResize: true,
                 onClose: () => UILogger.logMessage('特殊数据解析面板已关闭', 'info'),
                 onMinimize: () => UILogger.logMessage('特殊数据解析面板已最小化', 'info'),
-                onRestore: () => UILogger.logMessage('特殊数据解析面板已还原', 'info')
+                onRestore: () => UILogger.logMessage('特殊数据解析面板已还原', 'info'),
+                onFocus: () => UILogger.logMessage('特殊数据解析面板获得焦点', 'debug'),
+                onOpen: () => UILogger.logMessage('特殊数据解析面板创建完成', 'debug')
             });
 
-            const btnClear = BaseFloatingPanel.createPanelButton({
-                text: CONFIG.ICONS.trash,
-                title: '清空所有解析数据(Claude/ChatGPT)',
-                onClick: () => {
-                    inlineConfirm('确定清空全部解析数据吗？此操作不可恢复。', () => {
-                        SpecialDataParser.claudeConvData.length = 0;
-                        SpecialDataParser.chatgptConvData.length = 0;
-                        SpecialDataParser.chatgptTasksData.length = 0;
-                        this.updateSpecialDataPanel();
-                        UILogger.logMessage('已清空特殊数据解析', 'warn');
-                    });
-                }
+            // 工具栏按钮：清空、导出CSV、折叠/展开全部
+            const btnClear = BaseFloatingPanel.createPanelButton('TRASH', () => {
+                inlineConfirm('确定清空全部解析数据吗？此操作不可恢复。', () => {
+                    SpecialDataParser.claudeConvData.length = 0;
+                    SpecialDataParser.chatgptConvData.length = 0;
+                    SpecialDataParser.chatgptTasksData.length = 0;
+                    this.updateSpecialDataPanel();
+                    UILogger.logMessage('已清空特殊数据解析', 'warn');
+                });
             });
-            const btnCSV = BaseFloatingPanel.createPanelButton({
-                text: CONFIG.ICONS.table,
-                title: '导出所有解析数据为CSV',
-                onClick: () => this.downloadSpecialDataAsCSV()
-            });
-            const btnFoldAll = BaseFloatingPanel.createPanelButton({
-                text: CONFIG.ICONS.fold,
-                title: '折叠所有分类',
-                onClick: () => this.foldAllCategories(true)
-            });
-            const btnUnfoldAll = BaseFloatingPanel.createPanelButton({
-                text: CONFIG.ICONS.unfold,
-                title: '展开所有分类',
-                onClick: () => this.foldAllCategories(false)
-            });
+            btnClear.title = '清空所有解析数据(Claude/ChatGPT)';
+
+            const btnCSV = BaseFloatingPanel.createPanelButton('TO_CSV', () => this.downloadSpecialDataAsCSV());
+            btnCSV.title = '导出所有解析数据为CSV';
+
+            const btnFoldAll = BaseFloatingPanel.createPanelButton('FOLD_ALL', () => this.foldAllCategories(true));
+            const btnUnfoldAll = BaseFloatingPanel.createPanelButton('UNFOLD_ALL', () => this.foldAllCategories(false));
 
             const fragBar = document.createDocumentFragment();
             fragBar.appendChild(btnClear);
@@ -1991,7 +2309,7 @@
             const wrap = this.specialDataPanel.contentEl;
             wrap.innerHTML = '';
 
-            // Claude
+            // Claude分类
             this.claudeCat = this.createFoldableCategory('Claude对话');
             wrap.appendChild(this.claudeCat.wrapper);
 
@@ -2002,21 +2320,22 @@
 
             CONFIG.claudeBatchButtons.forEach(cfg => {
                 if (!cfg.enabled) return;
-                const btn = BaseFloatingPanel.createPanelButton({
-                    text: cfg.icon || cfg.label,
-                    title: `下载${cfg.days === Infinity ? '全部' : '最近' + cfg.days + '天'}的Claude对话`,
-                    onClick: () => {
-                        if (cfg.days === Infinity) {
-                            this.batchDownloadClaude(SpecialDataParser.claudeConvData, cfg.label);
-                        } else {
-                            this.batchDownloadClaudeWithinDays(cfg.days);
-                        }
+                const btn = document.createElement('button');
+                btn.className = 'floating-panel-btn';
+                btn.textContent = cfg.icon || cfg.label;
+                btn.title = `下载${cfg.days === Infinity ? '全部' : '最近' + cfg.days + '天'}的Claude对话`;
+                btn.addEventListener('click', () => {
+                    if (cfg.days === Infinity) {
+                        this.batchDownloadClaude(SpecialDataParser.claudeConvData, cfg.label);
+                    } else {
+                        this.batchDownloadClaudeWithinDays(cfg.days);
                     }
                 });
                 topBar.appendChild(btn);
             });
             this.claudeCat.header.appendChild(topBar);
 
+            // 进度条容器
             const progressWrap = document.createElement('div');
             progressWrap.className = 'claude-progress-wrap';
             progressWrap.style.display = 'none';
@@ -2040,7 +2359,7 @@
             this.claudeCat.content.appendChild(claudeUl);
             this.claudeListEl = claudeUl;
 
-            // ChatGPT
+            // ChatGPT对话分类
             this.chatgptCat = this.createFoldableCategory('ChatGPT对话');
             wrap.appendChild(this.chatgptCat.wrapper);
 
@@ -2049,7 +2368,7 @@
             this.chatgptCat.content.appendChild(chatgptUl);
             this.chatgptListEl = chatgptUl;
 
-            // ChatGPT任务
+            // ChatGPT任务分类
             this.chatgptTaskCat = this.createFoldableCategory('ChatGPT任务');
             wrap.appendChild(this.chatgptTaskCat.wrapper);
 
@@ -2062,12 +2381,14 @@
         createFoldableCategory(title) {
             const wrapper = document.createElement('div');
             wrapper.className = 'special-data-category';
+            wrapper.style.margin = CONFIG.layout.categoryMargin;
 
             const header = document.createElement('div');
             header.className = 'special-data-category-header';
+            header.style.padding = CONFIG.layout.categoryHeaderPadding;
 
             const foldIcon = document.createElement('span');
-            foldIcon.textContent = CONFIG.ICONS.unfold;
+            foldIcon.textContent = BUTTON_MAP.UNFOLD_ALL.icon; // 默认展开图标
             foldIcon.style.marginRight = '4px';
             foldIcon.style.cursor = 'pointer';
             foldIcon.style.color = 'var(--fold-icon-color)';
@@ -2088,7 +2409,7 @@
             let folded = false;
             foldIcon.addEventListener('click', () => {
                 folded = !folded;
-                foldIcon.textContent = folded ? CONFIG.ICONS.fold : CONFIG.ICONS.unfold;
+                foldIcon.textContent = folded ? BUTTON_MAP.FOLD_ALL.icon : BUTTON_MAP.UNFOLD_ALL.icon;
                 content.style.display = folded ? 'none' : 'block';
             });
 
@@ -2099,7 +2420,7 @@
             [this.claudeCat, this.chatgptCat, this.chatgptTaskCat].forEach(catObj => {
                 if (catObj) {
                     catObj.folded = fold;
-                    catObj.foldIcon.textContent = fold ? CONFIG.ICONS.fold : CONFIG.ICONS.unfold;
+                    catObj.foldIcon.textContent = fold ? BUTTON_MAP.FOLD_ALL.icon : BUTTON_MAP.UNFOLD_ALL.icon;
                     catObj.content.style.display = fold ? 'none' : 'block';
                 }
             });
@@ -2112,6 +2433,7 @@
                 SpecialDataParser.claudeConvData.forEach(item => {
                     const li = document.createElement('li');
                     li.className = 'special-data-list-item';
+                    li.style.padding = CONFIG.layout.itemPadding;
 
                     const line1 = document.createElement('div');
                     line1.className = 'special-data-item-line';
@@ -2127,7 +2449,7 @@
 
                     if (item.convUrl) {
                         const dlIcon = document.createElement('span');
-                        dlIcon.textContent = CONFIG.ICONS.downloadAll;
+                        dlIcon.textContent = BUTTON_MAP.DOWNLOAD_ALL.icon;
                         dlIcon.style.cursor = 'pointer';
                         dlIcon.title = '下载此对话';
                         dlIcon.addEventListener('click', () => {
@@ -2159,6 +2481,7 @@
                 SpecialDataParser.chatgptConvData.forEach(item => {
                     const li = document.createElement('li');
                     li.className = 'special-data-list-item';
+                    li.style.padding = CONFIG.layout.itemPadding;
 
                     const line1 = document.createElement('div');
                     line1.className = 'special-data-item-line';
@@ -2174,7 +2497,7 @@
 
                     if (item.convUrl) {
                         const dlIcon = document.createElement('span');
-                        dlIcon.textContent = CONFIG.ICONS.downloadAll;
+                        dlIcon.textContent = BUTTON_MAP.DOWNLOAD_ALL.icon;
                         dlIcon.style.cursor = 'pointer';
                         dlIcon.title = '下载此对话';
                         dlIcon.addEventListener('click', () => {
@@ -2206,6 +2529,7 @@
                 SpecialDataParser.chatgptTasksData.forEach(task => {
                     const li = document.createElement('li');
                     li.className = 'special-data-list-item';
+                    li.style.padding = CONFIG.layout.itemPadding;
 
                     const line1 = document.createElement('div');
                     line1.className = 'special-data-item-line';
@@ -2215,7 +2539,7 @@
                     line1.style.marginBottom = '4px';
 
                     const leftSpan = document.createElement('span');
-                    leftSpan.innerHTML = `<strong style="color:var(--special-title-color);">title:</strong> 
+                    leftSpan.innerHTML = `<strong style="color:var(--special-title-color);">title:</strong>
                         <span style="color:var(--special-title-color);">${task.title || ''}</span>`;
                     line1.appendChild(leftSpan);
                     li.appendChild(line1);
@@ -2227,7 +2551,7 @@
 
                     const line3 = document.createElement('div');
                     line3.className = 'special-data-item-line';
-                    line3.innerHTML = `<strong style="color:var(--special-update-color);">updated_at:</strong> 
+                    line3.innerHTML = `<strong style="color:var(--special-update-color);">updated_at:</strong>
                         <span style="color:var(--special-update-color);">${task.updated_at_shanghai || ''}</span>`;
 
                     const line4 = document.createElement('div');
@@ -2370,15 +2694,17 @@
         setFoldState(catObj, fold) {
             if (!catObj) return;
             catObj.folded = fold;
-            catObj.foldIcon.textContent = fold ? CONFIG.ICONS.fold : CONFIG.ICONS.unfold;
+            catObj.foldIcon.textContent = fold ? BUTTON_MAP.FOLD_ALL.icon : BUTTON_MAP.UNFOLD_ALL.icon;
             catObj.content.style.display = fold ? 'none' : 'block';
         }
     };
+
 
     /************************************************************************
      * 10. 主入口(main) & 样式注入
      ************************************************************************/
     function findStarUuid() {
+        // 如果URL中含 /c/xxxxxx 这样的UUID，就提取出来用于特殊标记
         const m = /\/c\/([0-9a-fA-F-]+)/.exec(location.href);
         if (m) RequestInterceptor.starUuid = m[1];
     }
@@ -2405,9 +2731,9 @@
 
     waitForBody();
 
-    // 注入CSS(单文件,不引用外部资源)
+    // 注入CSS（所有颜色/字号/尺寸都从CONFIG里映射为CSS变量）
     const cssText = `
-/* 行内确认(InlineConfirm) - 颜色/字号从主题及CONFIG.fontSizes获取 */
+/* =========================== 行内确认(InlineConfirm) =========================== */
 .inline-confirm-container {
     position: fixed;
     right: 16px;
@@ -2416,7 +2742,7 @@
     background: var(--inline-confirm-bg);
     color: var(--inline-confirm-text);
     border: 1px solid var(--inline-confirm-border);
-    padding: 8px 12px;
+    padding: var(--inline-confirm-padding);
     border-radius: 6px;
     box-shadow: 0 3px 12px rgba(0, 0, 0, 0.6);
     display: flex;
@@ -2443,32 +2769,31 @@
 
 .inline-confirm-btn {
     border: 1px solid #ccc;
-    background: #fff1;
+    background: var(--inline-confirm-btn-bg);
     color: inherit;
     border-radius: 4px;
     cursor: pointer;
     font-size: var(--font-size-inline-confirm);
-    padding: 2px 6px;
+    padding: var(--inline-confirm-button-padding);
+    transition: background 0.2s ease;
 }
 
 .inline-confirm-btn:hover {
-    background: #fff2;
+    background: var(--inline-confirm-btn-hover-bg);
 }
 
 .inline-confirm-yes {
-    /* 对号 - 绿色背景 */
     background: var(--inline-confirm-yes-bg);
     color: var(--inline-confirm-yes-text);
     margin-left: 6px;
 }
 
 .inline-confirm-no {
-    /* 错号 - 红色背景 */
     background: var(--inline-confirm-no-bg);
     color: var(--inline-confirm-no-text);
 }
 
-/* 通用面板样式 */
+/* ============================= 浮动面板基类 ============================= */
 .floating-panel-container {
     position: fixed;
     backdrop-filter: blur(4px);
@@ -2492,7 +2817,7 @@
 .floating-panel-container.minimized {
     overflow: hidden;
     resize: none;
-    height: var(--minimized-height, 36px) !important;
+    height: var(--minimized-height) !important;
 }
 
 .floating-panel-titlebar {
@@ -2509,13 +2834,13 @@
 }
 
 .floating-panel-drag-handle {
-    width: 18px;
-    height: 18px;
-    margin: 0 4px;
+    width: var(--drag-handle-size);
+    height: var(--drag-handle-size);
+    margin: var(--drag-handle-margin);
     background-color: var(--panel-handle-color);
     border-radius: 4px;
     cursor: move;
-    box-shadow: inset 0 1px 2px rgba(255, 255, 255, 0.4);
+    box-shadow: var(--drag-handle-inner-shadow);
 }
 
 .floating-panel-title {
@@ -2538,14 +2863,15 @@
     padding: 0 5px;
     border-radius: 4px;
     transition: background 0.2s ease;
-    color: var(--panel-btn-text-color);
     font-size: var(--button-size-titlebar);
+    color: var(--panel-btn-text-color);
 }
 
 .floating-panel-btn:hover {
-    background: rgba(0, 0, 0, 0.1);
+    background: var(--panel-btn-hover-bg);
 }
 
+/* 让最小化 & 关闭按钮真正跟随主题，不要被覆盖 */
 .floating-panel-btn.minimize-btn {
     color: var(--panel-minimize-btn-color) !important;
 }
@@ -2558,7 +2884,7 @@
     display: none;
     position: fixed;
     left: 10px;
-    border: 1px solid #999;
+    border: 1px solid var(--floating-reopen-btn-border);
     border-radius: 4px;
     padding: 6px 12px;
     cursor: pointer;
@@ -2571,12 +2897,11 @@
 .floating-panel-content {
     flex: 1;
     overflow: auto;
-    padding: 4px;
     font-size: var(--font-size-content);
     color: var(--panel-btn-text-color);
 }
 
-/* 日志面板 */
+/* =============================== 日志面板 =============================== */
 .log-panel-list {
     list-style: none;
     margin: 0;
@@ -2593,7 +2918,11 @@
     word-wrap: break-word;
 }
 
-/* JSON面板搜索 */
+.log-line {
+    margin: 2px 0;
+}
+
+/* ============================== JSON面板搜索 ============================== */
 .json-panel-search-wrap {
     margin: 4px;
     display: flex;
@@ -2615,9 +2944,8 @@
     color: var(--panel-btn-text-color);
 }
 
-/* 分类 */
+/* ============================== JSON分类 ============================== */
 .json-panel-category {
-    margin: 8px;
     border: 1px solid var(--category-border-color);
     border-radius: 6px;
     background: transparent;
@@ -2629,7 +2957,6 @@
     display: flex;
     align-items: center;
     justify-content: space-between;
-    padding: 4px 8px;
     background: var(--category-header-bg);
     border-bottom: 1px solid var(--category-border-color);
     border-top-left-radius: 6px;
@@ -2652,7 +2979,6 @@
 .json-panel-item {
     display: flex;
     align-items: center;
-    padding: 4px 8px;
     border-bottom: 1px solid var(--item-divider-color);
     font-size: var(--font-size-category-item);
     color: var(--panel-btn-text-color);
@@ -2680,14 +3006,14 @@
     white-space: nowrap;
     text-overflow: ellipsis;
     margin-right: 6px;
-    color: #666;
+    color: var(--json-url-color);
 }
 
 .size-span {
-    color: #999;
+    color: var(--json-size-color);
 }
 
-/* JSON预览面板 */
+/* =============================== JSON预览 =============================== */
 .json-preview-content {
     background: rgba(246, 248, 250, 0.2);
     padding: 8px;
@@ -2723,9 +3049,8 @@
     color: var(--highlight-key-color);
 }
 
-/* 特殊数据面板 */
+/* ============================ 特殊数据面板 ============================ */
 .special-data-category {
-    margin: 8px;
     border: 1px solid var(--category-border-color);
     border-radius: 6px;
     background: transparent;
@@ -2736,7 +3061,6 @@
 .special-data-category-header {
     display: flex;
     align-items: center;
-    padding: 4px 8px;
     background: var(--category-header-bg);
     border-bottom: 1px solid var(--category-border-color);
     border-top-left-radius: 6px;
@@ -2759,7 +3083,6 @@
 .special-data-list-item {
     display: flex;
     flex-direction: column;
-    padding: 4px 8px;
     border-bottom: 1px solid var(--item-divider-color);
     font-size: var(--font-size-category-item);
     color: var(--panel-btn-text-color);
@@ -2774,14 +3097,14 @@
     font-size: var(--font-size-category-item);
 }
 
-/* Claude进度条 */
+/* ============================ Claude进度条 ============================ */
 .claude-progress-wrap {
     margin: 8px;
     border: 1px solid var(--panel-border-color);
     border-radius: 4px;
-    height: 28px;
+    height: var(--progress-bar-height);
     position: relative;
-    background: #f8f8f899;
+    background: var(--progress-wrap-bg);
     overflow: hidden;
 }
 
@@ -2802,15 +3125,15 @@
     width: 100%;
     height: 100%;
     text-align: center;
-    line-height: 28px;
+    line-height: var(--progress-bar-height);
     font-size: var(--font-size-content);
     color: var(--progress-bar-text-color);
     pointer-events: none;
     white-space: pre-wrap;
 }
 `;
+
     const styleEl = document.createElement('style');
     styleEl.textContent = cssText;
     document.head.appendChild(styleEl);
-
 })();
